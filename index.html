@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI demand chain</title>
+  <meta name="description" content="A Sankey map of AI demand, token workloads, compute, datacenters, and upstream commodities." />
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+      --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 32rem),
+        linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell { width: min(1860px, calc(100vw - 36px)); margin: 0 auto; padding: 22px 0 28px; }
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: start;
+      margin-bottom: 16px;
+    }
+    .eyebrow {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--muted);
+      font-weight: 850;
+      margin-bottom: 8px;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 3.7vw, 52px);
+      line-height: 0.98;
+      letter-spacing: -0.055em;
+    }
+    .subhead {
+      margin: 12px 0 0;
+      max-width: 980px;
+      color: #334155;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    .meta {
+      justify-self: end;
+      min-width: 260px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.78);
+      padding: 14px;
+      box-shadow: 0 6px 24px rgba(15, 23, 42, 0.05);
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .meta strong { color: var(--ink); }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+      margin: 18px 0 20px;
+      flex-wrap: wrap;
+    }
+    .tab-button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 12px 14px;
+      font: inherit;
+      font-weight: 780;
+      border-radius: 12px 12px 0 0;
+      cursor: pointer;
+    }
+    .tab-button[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .sankey-layout {
+      display: grid;
+      grid-template-columns: minmax(980px, 1fr) minmax(320px, 370px);
+      gap: 18px;
+      align-items: start;
+    }
+    .chart-card, .detail-card, .theme-card, .source-card {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .chart-card { padding: 14px; overflow: hidden; min-height: 755px; }
+    .chart-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 2px 4px 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .legend { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #fff;
+      white-space: nowrap;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    #sankey { width: 100%; height: 705px; display: block; }
+    .node rect {
+      cursor: pointer;
+      stroke: rgba(15, 23, 42, 0.18);
+      stroke-width: 1;
+      shape-rendering: crispEdges;
+    }
+    .node-label {
+      fill: #0f172a;
+      font-size: 12px;
+      font-weight: 740;
+      letter-spacing: -0.012em;
+      stroke: none !important;
+      text-shadow: none !important;
+      paint-order: normal;
+      pointer-events: none;
+    }
+    .node-group-label {
+      fill: #64748b;
+      font-size: 10px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      stroke: none !important;
+      pointer-events: none;
+    }
+    .link {
+      fill: none;
+      stroke-opacity: 0.34;
+      cursor: pointer;
+      mix-blend-mode: multiply;
+    }
+    .link:hover { stroke-opacity: 0.64; }
+    .link.selected { stroke-opacity: 0.80; }
+    .node.selected rect { stroke: var(--ink); stroke-width: 2; }
+    .detail-card {
+      padding: 18px;
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+    .detail-kicker {
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 850;
+      margin-bottom: 8px;
+    }
+    .detail-card h2 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      line-height: 1.08;
+      letter-spacing: -0.04em;
+    }
+    .detail-summary { color: #334155; line-height: 1.5; margin: 0 0 16px; }
+    .claim-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+    .claim-item {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: #f8fafc;
+    }
+    .claim-text { margin: 0 0 8px; font-size: 14px; line-height: 1.45; }
+    .source-links { display: flex; flex-wrap: wrap; gap: 6px; }
+    .source-link {
+      font-size: 11px;
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border-radius: 999px;
+      padding: 4px 7px;
+      font-weight: 760;
+    }
+    .secondary-link {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .mini-stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0 0 12px;
+    }
+    .tooltip {
+      position: fixed;
+      z-index: 20;
+      max-width: 380px;
+      pointer-events: none;
+      background: rgba(15, 23, 42, 0.96);
+      color: white;
+      border-radius: 14px;
+      padding: 12px 13px;
+      box-shadow: 0 18px 44px rgba(15,23,42,.28);
+      opacity: 0;
+      transform: translate(-50%, calc(-100% - 12px));
+      transition: opacity .08s ease;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .tooltip strong { display: block; font-size: 13px; margin-bottom: 5px; }
+    .tooltip ul { margin: 8px 0 0 17px; padding: 0; color: #dbeafe; }
+    .tooltip .hint { margin-top: 8px; color: #bfdbfe; font-weight: 720; }
+    .theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .theme-card { padding: 18px; }
+    .theme-card h2 { margin: 0 0 8px; font-size: 19px; letter-spacing: -0.03em; }
+    .theme-card p { margin: 0 0 12px; color: #334155; line-height: 1.5; }
+    .source-library {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .source-card { padding: 12px; font-size: 13px; box-shadow: none; display: grid; gap: 7px; }
+    .source-card a.primary-source { font-weight: 780; color: var(--ink); }
+    .source-card .source-meta { color: var(--muted); font-size: 11px; }
+    .note { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 14px 0 0; }
+    @media (max-width: 1320px) {
+      header, .sankey-layout { grid-template-columns: 1fr; }
+      .meta { justify-self: stretch; }
+      .detail-card { position: relative; top: auto; max-height: none; }
+      .source-library { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #sankey { height: 760px; }
+      .chart-card { min-height: 805px; }
+    }
+    @media (max-width: 820px) {
+      .shell { width: min(100% - 22px, 100%); padding-top: 14px; }
+      .chart-card { padding: 10px; overflow-x: auto; }
+      .chart-toolbar { align-items: flex-start; flex-direction: column; }
+      #sankey { min-width: 980px; height: 850px; }
+      .node-label { font-size: 10.5px; }
+      .theme-grid, .source-library { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">AI demand chain</div>
+        <h1>AI monetisation becomes infrastructure demand.</h1>
+        <p class="subhead">A qualitative map from user/workflow ownership into token demand, compute, memory, networking, datacenters, power, and upstream commodities. Click any node or flow segment to inspect the claims behind it.</p>
+      </div>
+      <aside class="meta">
+        <strong>Sources:</strong> <a href="https://www.clarityreader.xyz/" target="_blank" rel="noopener">ClarityReader</a> and <a href="https://github.com/totlsota/pica/blob/main/pica-whitepaper-v2.md" target="_blank" rel="noopener">PICA</a>
+      </aside>
+    </header>
+
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab-button" data-tab="sankey-tab" aria-selected="true">Sankey map</button>
+      <button class="tab-button" data-tab="themes-tab" aria-selected="false">1–2y ramifications</button>
+    </nav>
+
+    <main>
+      <section id="sankey-tab" class="tab-panel active">
+        <div class="sankey-layout">
+          <section class="chart-card">
+            <div class="chart-toolbar">
+              <div><strong>How to read it:</strong> demand owners on the left pull capacity through monetisation, workloads, compute, facilities, and commodities.</div>
+              <div class="legend" id="legend"></div>
+            </div>
+            <svg id="sankey" role="img" aria-label="Sankey diagram mapping AI monetisation to infrastructure demand"></svg>
+          </section>
+          <aside id="detail-panel" class="detail-card" aria-live="polite">
+            <div class="detail-kicker">Selected flow segment</div>
+            <h2>Click a node or flow</h2>
+            <p class="detail-summary">The claims and source links for the selected part of the map will appear here. Hover gives a compact tooltip; click gives the full claim list.</p>
+          </aside>
+        </div>
+        <h2 style="margin: 26px 0 10px; letter-spacing: -0.03em;">Source library</h2>
+        <div id="source-library" class="source-library"></div>
+      </section>
+
+      <section id="themes-tab" class="tab-panel">
+        <div id="theme-grid" class="theme-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="tooltip" class="tooltip"></div>
+  <script id="app-data" type="application/json">{"sources":[{"id":"compute_alloc","title":"Mythos, Muse, and the Opportunity Cost of Compute","url":"https://stratechery.com/2026/mythos-muse-and-the-opportunity-cost-of-compute/","shortTitle":"Stratechery — compute allocation","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/5bc716e3-c555-4770-ba62-1d289ffc70a5"},{"id":"ms_platform","title":"An Interview with Microsoft CEO Satya Nadella About Finding Core Competencies","url":"https://stratechery.com/2026/an-interview-with-microsoft-ceo-satya-nadella-about-finding-core-competencies/","shortTitle":"Stratechery — Nadella interview","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/1e2ee69d-b858-48b2-b0db-e1a4f0790475"},{"id":"orbital_spacex","title":"The SpaceX IPO and Data Centers in Space","url":"https://stratechery.com/2026/the-spacex-ipo-and-data-centers-in-space/","shortTitle":"Stratechery — SpaceX + orbital compute","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/b66832d5-649b-4e8c-b4d8-58947721a31b"},{"id":"orbital_econ","title":"Why we should train AI in space — white paper","url":"https://www.clarityreader.xyz/d/af5247ff-7efa-477a-b042-387c8ac699f8","shortTitle":"Orbital AI white paper — Clarity fallback","sourceType":"clarity-fallback","clarityUrl":"https://www.clarityreader.xyz/d/af5247ff-7efa-477a-b042-387c8ac699f8"},{"id":"power_delivery","title":"Building a Datacenter Part II","url":"https://cruciblecapital.substack.com/p/building-a-datacenter-part-ii","shortTitle":"Crucible — power + cooling","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/05188ef5-abc1-4051-9509-15f879f88e11"},{"id":"site_power","title":"Building a Datacenter (for Dummies) Part I","url":"https://cruciblecapital.substack.com/p/building-a-datacenter-for-dummies","shortTitle":"Crucible — sites + power","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/252b6038-7e62-4e06-9544-a321c77b1f86"},{"id":"jevons","title":"28May26 — Jevons/token-cost PDF summary","url":"https://www.clarityreader.xyz/d/503cdf40-dbcc-47a6-a21e-7e00388cb0e7","shortTitle":"28May26 PDF — Clarity fallback","sourceType":"clarity-fallback","clarityUrl":"https://www.clarityreader.xyz/d/503cdf40-dbcc-47a6-a21e-7e00388cb0e7"},{"id":"deepseek","title":"DeepSeek's 10 trillion USD grand strategy","url":"https://x.com/bookwormengr/status/2057909493250539891","shortTitle":"GDP/bookwormengr — DeepSeek strategy","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/3114dc2f-ca05-466f-b9d0-d2cf32a43815"},{"id":"thin_apps","title":"Avoiding Death on the Yellow Brick Road","url":"https://www.a16z.news/p/avoiding-death-on-the-yellow-brick","shortTitle":"a16z — Yellow Brick Road","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/d771f55e-2735-44cd-bcda-3a78d975da6c"},{"id":"google_search","title":"Sundar Pichai on AI, search, and the web","url":"https://www.theverge.com/podcast/936445/sundar-pichai-ai-search-google-zero-youtube-web","shortTitle":"The Verge — Pichai interview","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/601df3b8-0ed7-43aa-9cb0-dd5892655a4c"},{"id":"cyber","title":"Project Glasswing: what Mythos showed us","url":"https://blog.cloudflare.com/cyber-frontier-models/","shortTitle":"Cloudflare — Project Glasswing","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/4db4748e-4f2d-4cdf-8e60-6c4fd60b1316"},{"id":"networking","title":"The Datacenter Series Part 3: Networking Systems","url":"https://cruciblecapital.substack.com/p/the-datacenter-series-part-3-networking","shortTitle":"Crucible — networking systems","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/c715a9f8-55e7-40c4-9ac2-420db9790f90"},{"id":"nvidia","title":"Nvidia Earnings, The AI Stack, Nvidia’s New Reporting","url":"https://stratechery.com/2026/nvidia-earnings-the-ai-stack-nvidias-new-reporting/","shortTitle":"Stratechery — Nvidia AI stack","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/f143776b-a968-4e84-b2f4-63146739c829"},{"id":"neocloud","title":"Clouded Judgement 5.22.26 — The Neocloud Boom","url":"https://cloudedjudgement.substack.com/p/clouded-judgement-52226-the-neocloud","shortTitle":"Clouded Judgement — neoclouds","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/314b87dc-cf99-422a-89b3-f1cf8c5d1881"},{"id":"openai_moat","title":"How will OpenAI compete?","url":"https://www.ben-evans.com/benedictevans/2026/2/19/how-will-openai-compete-nkg2x","shortTitle":"Benedict Evans — OpenAI moat","sourceType":"original","clarityUrl":"https://www.clarityreader.xyz/d/1fd4d1a1-595e-4b7d-9819-873ba0c67b1a"}],"claims":[{"id":"demand_pull","text":"Companies with monetisable users or owned workflows can justify scarce inference better than companies with only a generic model surface.","sources":["compute_alloc","openai_moat","thin_apps"]},{"id":"frontier_converges","text":"Frontier models are treated as converging enough that distribution, workflow context, evals, and pricing power matter more than a temporary benchmark lead.","sources":["openai_moat","ms_platform","thin_apps"]},{"id":"enterprise_loops","text":"Enterprise value comes from private data, tacit knowledge, customer-specific evals, and closed learning loops rather than a one-size-fits-all assistant.","sources":["ms_platform"]},{"id":"model_routing","text":"Model routing becomes strategic: buyers want the right model, cost, latency, privacy, and governance for each task rather than allegiance to one lab.","sources":["ms_platform","compute_alloc"]},{"id":"thin_wrappers","text":"Thin horizontal AI wrappers are exposed because labs and platforms can absorb generic writing, coding, image, and assistant surfaces.","sources":["thin_apps"]},{"id":"systems_work","text":"Vertical systems with permissions, audit trails, data capture, integrations, and measurable workflow ROI are more defensible than standalone tools.","sources":["thin_apps","ms_platform"]},{"id":"compute_opp_cost","text":"The binding cost of a running AI cluster is opportunity cost: which revenue-generating workload gets the next token, GPU-hour, or memory slice.","sources":["compute_alloc"]},{"id":"consumer_throttle","text":"Free or low-value consumer usage is likely to be throttled, degraded, ad-supported, or routed to cheaper models when capacity is tight.","sources":["compute_alloc","openai_moat","google_search"]},{"id":"jevons_expand","text":"Lower per-token costs expand total usage because cheaper inference unlocks more agent loops, tool calls, long context, and automated work.","sources":["jevons"]},{"id":"agent_loops","text":"The workload mix shifts from simple chat toward multi-step agents, coding/security trajectories, tool use, and repeated verification calls.","sources":["jevons","cyber","thin_apps"]},{"id":"long_context_memory","text":"Long-context products are constrained by memory and cache economics, not only raw accelerator FLOPS.","sources":["deepseek","nvidia"]},{"id":"kv_compression","text":"KV-cache compression and SSD/NAND offload can make long-context agents cheaper and reduce dependence on scarce HBM.","sources":["deepseek"]},{"id":"cuda_portability","text":"Portable kernels and non-CUDA stacks matter because hyperscalers, China, and alternative accelerators all want to weaken Nvidia lock-in.","sources":["deepseek","nvidia"]},{"id":"nvidia_fullstack","text":"Nvidia’s strongest position is full-stack system delivery, especially where customers need deployable capacity rather than just chips.","sources":["nvidia","networking","power_delivery"]},{"id":"hyperscaler_pressure","text":"Hyperscalers buy massive volume but also have the strongest incentive to substitute custom silicon, networking, and software layers.","sources":["nvidia","ms_platform"]},{"id":"site_constraints","text":"Datacenter expansion is constrained by land, power interconnects, water, fiber, permitting, and local politics, not just hardware supply.","sources":["site_power","power_delivery"]},{"id":"power_density","text":"AI rack density pushes power distribution, transformers, switchgear, busways, and liquid cooling into the critical path.","sources":["power_delivery"]},{"id":"network_power","text":"As clusters scale, networking and optics become a power-per-bit, latency, and reliability problem—not a simple bandwidth procurement problem.","sources":["networking"]},{"id":"neocloud_contracts","text":"Neocloud winners need strong offtake contracts, power access, utilisation, financing, and credible residual-value assumptions.","sources":["neocloud","compute_alloc"]},{"id":"financing_bifurcation","text":"Capacity businesses should bifurcate: contracted, powered, well-financed platforms survive; spot-demand GPU lessors get squeezed.","sources":["neocloud","site_power"]},{"id":"cyber_escalates","text":"Advanced agents can compress exploit research cycles, making proof-of-exploit generation and automated vulnerability triage more operationally important.","sources":["cyber"]},{"id":"security_architecture","text":"The security response shifts toward isolation, memory safety, sandboxing, runtime controls, rollout safety, and agent-vs-agent review.","sources":["cyber"]},{"id":"search_cannibalise","text":"AI answer surfaces and agents cannibalise traditional search referral flows, forcing publishers and Google to renegotiate distribution economics.","sources":["google_search"]},{"id":"commerce_intent","text":"Consumer AI monetisation likely shifts toward ads, commerce intent, subscriptions, and transaction capture inside AI surfaces.","sources":["google_search","openai_moat"]},{"id":"orbital_option","text":"Orbital compute is an option on terrestrial bottlenecks: attractive if power, cooling, permitting, and land constraints stay binding.","sources":["orbital_spacex","orbital_econ","site_power"]},{"id":"orbital_not_base","text":"Space datacenters are not a near-term base case; they are likely prototypes and financing narratives before material capacity relief.","sources":["orbital_spacex","orbital_econ"]},{"id":"commodities_pass","text":"Token demand transmits upstream into electricity, gas, nuclear, renewables, copper, transformers, optics, cooling, construction, and project finance.","sources":["site_power","power_delivery","networking","neocloud"]}],"nodes":[{"id":"consumer_dist","label":"Consumer apps + search","group":"Demand owners","summary":"Large consumer surfaces convert attention and intent into chat, search, commerce, and ad-supported AI demand.","claimIds":["demand_pull","consumer_throttle","search_cannibalise","commerce_intent"]},{"id":"enterprise_platforms","label":"Enterprise systems of work","group":"Demand owners","summary":"Platforms embedded in business workflows can route high-value tasks through governed AI systems.","claimIds":["enterprise_loops","model_routing","systems_work","demand_pull"]},{"id":"developer_security","label":"Code + security agents","group":"Demand owners","summary":"Code and security agents create high-value, long-running trajectories with clear willingness to pay.","claimIds":["agent_loops","cyber_escalates","security_architecture"]},{"id":"frontier_labs","label":"Frontier model labs","group":"Demand owners","summary":"Labs monetise APIs and subscriptions, but face pressure if users and workflows are owned elsewhere.","claimIds":["frontier_converges","demand_pull","compute_opp_cost"]},{"id":"sovereign_industrial","label":"Sovereign + industrial capacity","group":"Demand owners","summary":"Governments, industrials, and AI-native clouds buy capacity for strategic control, sovereignty, and guaranteed supply.","claimIds":["neocloud_contracts","financing_bifurcation","nvidia_fullstack"]},{"id":"ads_commerce","label":"Ads + commerce","group":"Monetisation","summary":"Consumer AI needs monetisation beyond generic subscriptions: ads, commerce, and transaction intent become important.","claimIds":["commerce_intent","search_cannibalise","consumer_throttle"]},{"id":"seat_consumption","label":"Seats + usage pricing","group":"Monetisation","summary":"Enterprise plans blend predictable per-seat pricing with consumption charges as agent usage scales.","claimIds":["enterprise_loops","model_routing","compute_opp_cost"]},{"id":"workflow_roi","label":"Workflow automation","group":"Monetisation","summary":"The strongest app-layer monetisation attaches to measurable work completed, not generic assistant usage.","claimIds":["systems_work","thin_wrappers","enterprise_loops"]},{"id":"api_subs","label":"Model/API subscriptions","group":"Monetisation","summary":"API demand remains meaningful, but commoditisation pressure makes routing, price/performance, and distribution decisive.","claimIds":["frontier_converges","model_routing","demand_pull"]},{"id":"capacity_contracts","label":"Capacity contracts","group":"Monetisation","summary":"Scarce infrastructure is increasingly financed against committed capacity demand and credible offtake.","claimIds":["neocloud_contracts","financing_bifurcation","site_constraints"]},{"id":"chat_search_tokens","label":"Search/chat tokens","group":"Token workloads","summary":"High-volume interactive usage remains important but is easier to down-tier when capacity is scarce.","claimIds":["consumer_throttle","search_cannibalise","commerce_intent"]},{"id":"agent_tool_tokens","label":"Agent loops","group":"Token workloads","summary":"Multi-step agents multiply token volume through planning, tool calls, verification, retries, and memory use.","claimIds":["jevons_expand","agent_loops","compute_opp_cost"]},{"id":"long_context_cache","label":"Long-context cache","group":"Token workloads","summary":"Long-context products pull demand toward memory hierarchy, KV-cache efficiency, and cheaper storage tiers.","claimIds":["long_context_memory","kv_compression","cuda_portability"]},{"id":"code_cyber_traj","label":"Code/cyber trajectories","group":"Token workloads","summary":"Coding and exploit-research agents use longer trajectories, tool feedback, tests, and execution loops.","claimIds":["agent_loops","cyber_escalates","security_architecture"]},{"id":"inference","label":"Inference","group":"Compute layer","summary":"Inference absorbs more capacity as AI moves from demos to always-on production products and agents.","claimIds":["jevons_expand","compute_opp_cost","nvidia_fullstack"]},{"id":"training_rl","label":"Training/RL","group":"Compute layer","summary":"Frontier progress and agent improvement still require training, reinforcement learning, synthetic data, and eval-heavy clusters.","claimIds":["enterprise_loops","compute_opp_cost","frontier_converges"]},{"id":"memory_cache_tier","label":"KV cache/memory","group":"Compute layer","summary":"Memory capacity, cache reuse, and storage offload increasingly shape cost curves for long-context and agentic systems.","claimIds":["long_context_memory","kv_compression","cuda_portability"]},{"id":"accelerators","label":"Accelerators + systems","group":"Hardware","summary":"Accelerators remain central, but the deliverable is shifting toward complete, networked, powered systems.","claimIds":["nvidia_fullstack","hyperscaler_pressure","compute_opp_cost"]},{"id":"memory_storage","label":"Memory/storage","group":"Hardware","summary":"Memory and storage economics matter more as context windows, cache sizes, and model-serving state grow.","claimIds":["long_context_memory","kv_compression","cuda_portability"]},{"id":"networking_optics","label":"Network + optics","group":"Hardware","summary":"Cluster scale turns networking into a performance, power, and reliability bottleneck.","claimIds":["network_power","nvidia_fullstack","site_constraints"]},{"id":"power_cooling","label":"Power/cooling/racks","group":"Facilities","summary":"Dense AI racks pull power electronics, switchgear, transformers, busways, and cooling into the critical path.","claimIds":["power_density","site_constraints","commodities_pass"]},{"id":"sites_fiber_permits","label":"Sites/fiber/permits","group":"Facilities","summary":"The right site needs energy, network access, cooling resources, community permission, and financing alignment.","claimIds":["site_constraints","network_power","financing_bifurcation"]},{"id":"orbital_compute","label":"Orbital compute","group":"Facilities","summary":"Space compute is a speculative escape valve if terrestrial power, land, water, cooling, and permitting remain blocked.","claimIds":["orbital_option","orbital_not_base"]},{"id":"electricity","label":"Electricity/energy","group":"Commodities / primitives","summary":"AI demand becomes a load-growth story across generation, contracts, and grid infrastructure.","claimIds":["commodities_pass","site_constraints","power_density"]},{"id":"copper_power_elec","label":"Copper/power gear","group":"Commodities / primitives","summary":"Higher rack density and faster datacenter buildouts increase pressure on power equipment supply chains.","claimIds":["power_density","commodities_pass"]},{"id":"fiber_optics_lasers","label":"Dark fiber/optics","group":"Commodities / primitives","summary":"AI clusters and distributed datacenters require low-latency fiber, optics, and increasingly efficient photonics.","claimIds":["network_power","site_constraints","commodities_pass"]},{"id":"construction_finance","label":"Construction finance","group":"Commodities / primitives","summary":"Capacity growth depends on financing, construction execution, interconnection timing, and contract quality.","claimIds":["financing_bifurcation","neocloud_contracts","commodities_pass"]},{"id":"launch_space_inputs","label":"Launch/space hardware","group":"Commodities / primitives","summary":"Orbital compute would redirect demand toward launch cadence, in-space power, thermal systems, and optical links.","claimIds":["orbital_option","orbital_not_base"]}],"links":[{"source":"consumer_dist","target":"ads_commerce","value":18,"summary":"Consumer distribution monetises through ads, commerce, subscriptions, and intent capture.","claimIds":["commerce_intent","search_cannibalise","consumer_throttle"]},{"source":"consumer_dist","target":"api_subs","value":6,"summary":"Some consumer usage converts into paid assistants and app subscriptions, but the route is less direct than enterprise ROI.","claimIds":["demand_pull","consumer_throttle","frontier_converges"]},{"source":"enterprise_platforms","target":"seat_consumption","value":22,"summary":"Enterprise platforms package AI into seats but need usage pricing as agents expand consumption.","claimIds":["enterprise_loops","model_routing","compute_opp_cost"]},{"source":"enterprise_platforms","target":"workflow_roi","value":14,"summary":"Workflow owners can charge against measured work, automation, compliance, and process improvement.","claimIds":["systems_work","enterprise_loops","thin_wrappers"]},{"source":"developer_security","target":"seat_consumption","value":10,"summary":"Coding and security tools fit per-seat budgets, especially when tied to productivity or risk reduction.","claimIds":["agent_loops","cyber_escalates","security_architecture"]},{"source":"developer_security","target":"api_subs","value":8,"summary":"Developers and security teams also consume model APIs directly for custom agents and pipelines.","claimIds":["agent_loops","model_routing","cyber_escalates"]},{"source":"frontier_labs","target":"api_subs","value":12,"summary":"Frontier labs sell model access, but pricing power depends on differentiation and downstream demand control.","claimIds":["frontier_converges","demand_pull","model_routing"]},{"source":"frontier_labs","target":"capacity_contracts","value":18,"summary":"Labs need guaranteed capacity and use long-term commitments to secure scarce clusters.","claimIds":["compute_opp_cost","neocloud_contracts","financing_bifurcation"]},{"source":"sovereign_industrial","target":"capacity_contracts","value":14,"summary":"Sovereign and industrial buyers finance capacity to guarantee access and control strategic workloads.","claimIds":["neocloud_contracts","nvidia_fullstack","site_constraints"]},{"source":"sovereign_industrial","target":"workflow_roi","value":6,"summary":"Industrial AI demand is more defensible when it is tied to production workflows and operational ROI.","claimIds":["systems_work","enterprise_loops","demand_pull"]},{"source":"ads_commerce","target":"chat_search_tokens","value":20,"summary":"Ads and commerce-driven AI begin with high-volume search/chat interactions.","claimIds":["commerce_intent","search_cannibalise","consumer_throttle"]},{"source":"ads_commerce","target":"agent_tool_tokens","value":4,"summary":"Consumer surfaces slowly push from answers toward agents that shop, book, compare, and transact.","claimIds":["commerce_intent","agent_loops","jevons_expand"]},{"source":"seat_consumption","target":"agent_tool_tokens","value":24,"summary":"Enterprise seats turn into repeated agent actions, tool use, verification, and workflow execution.","claimIds":["enterprise_loops","agent_loops","compute_opp_cost"]},{"source":"seat_consumption","target":"code_cyber_traj","value":8,"summary":"Developer/security seats produce long code, test, review, and exploit-analysis trajectories.","claimIds":["agent_loops","cyber_escalates","security_architecture"]},{"source":"workflow_roi","target":"agent_tool_tokens","value":14,"summary":"Workflow ROI is realised through agents that actually execute multi-step business processes.","claimIds":["systems_work","agent_loops","enterprise_loops"]},{"source":"workflow_roi","target":"long_context_cache","value":6,"summary":"Systems of work need persistent context, records, memory, permissions, and audit trails.","claimIds":["systems_work","long_context_memory","enterprise_loops"]},{"source":"api_subs","target":"chat_search_tokens","value":8,"summary":"API subscriptions serve chat, search, assistants, and app-level AI experiences.","claimIds":["frontier_converges","model_routing","consumer_throttle"]},{"source":"api_subs","target":"agent_tool_tokens","value":10,"summary":"APIs increasingly power agent loops and tool-using applications.","claimIds":["agent_loops","jevons_expand","model_routing"]},{"source":"api_subs","target":"long_context_cache","value":6,"summary":"APIs with long-context and memory features create extra cache and storage pressure.","claimIds":["long_context_memory","kv_compression","model_routing"]},{"source":"api_subs","target":"code_cyber_traj","value":2,"summary":"Specialised API use also flows into code and security workflows.","claimIds":["agent_loops","cyber_escalates"]},{"source":"capacity_contracts","target":"training_rl","value":22,"summary":"Committed capacity supports frontier training, RL, synthetic-data pipelines, and evaluation-heavy improvement loops.","claimIds":["compute_opp_cost","enterprise_loops","neocloud_contracts"]},{"source":"capacity_contracts","target":"inference","value":10,"summary":"Capacity contracts also reserve serving capacity for production inference.","claimIds":["neocloud_contracts","compute_opp_cost","jevons_expand"]},{"source":"chat_search_tokens","target":"inference","value":28,"summary":"Search/chat tokens mostly land in inference serving.","claimIds":["consumer_throttle","commerce_intent","compute_opp_cost"]},{"source":"agent_tool_tokens","target":"inference","value":28,"summary":"Agent loops generate many inference calls through planning, acting, verifying, and retrying.","claimIds":["agent_loops","jevons_expand","compute_opp_cost"]},{"source":"agent_tool_tokens","target":"training_rl","value":8,"summary":"Agent usage produces data and evaluation pressure that feeds training, RL, and model improvement.","claimIds":["enterprise_loops","agent_loops","frontier_converges"]},{"source":"long_context_cache","target":"inference","value":4,"summary":"Long-context requests still require serving capacity, even when cache efficiency improves.","claimIds":["long_context_memory","kv_compression"]},{"source":"long_context_cache","target":"memory_cache_tier","value":14,"summary":"The larger pressure from long context lands on KV cache, memory hierarchy, and storage offload.","claimIds":["long_context_memory","kv_compression","cuda_portability"]},{"source":"code_cyber_traj","target":"inference","value":8,"summary":"Code and cyber agents make repeated inference calls while using tools, tests, and execution feedback.","claimIds":["agent_loops","cyber_escalates"]},{"source":"code_cyber_traj","target":"training_rl","value":10,"summary":"Coding and security trajectories create valuable feedback for training, RL, and specialised evals.","claimIds":["cyber_escalates","enterprise_loops","agent_loops"]},{"source":"inference","target":"accelerators","value":46,"summary":"Inference growth pulls demand for accelerators and complete serving systems.","claimIds":["jevons_expand","nvidia_fullstack","compute_opp_cost"]},{"source":"inference","target":"networking_optics","value":12,"summary":"High-throughput inference still needs networking, especially for distributed serving and cluster scheduling.","claimIds":["network_power","nvidia_fullstack"]},{"source":"training_rl","target":"accelerators","value":34,"summary":"Training and RL clusters remain accelerator-heavy.","claimIds":["compute_opp_cost","nvidia_fullstack","hyperscaler_pressure"]},{"source":"training_rl","target":"networking_optics","value":14,"summary":"Training clusters are highly sensitive to interconnect, fabric reliability, and network power efficiency.","claimIds":["network_power","nvidia_fullstack"]},{"source":"memory_cache_tier","target":"memory_storage","value":18,"summary":"Long-context cache pressure maps directly into HBM, DRAM, NAND, SSD, and memory hierarchy design.","claimIds":["long_context_memory","kv_compression","cuda_portability"]},{"source":"accelerators","target":"power_cooling","value":54,"summary":"Accelerator-dense racks pull power delivery and cooling into the bottleneck layer.","claimIds":["power_density","nvidia_fullstack","commodities_pass"]},{"source":"accelerators","target":"sites_fiber_permits","value":16,"summary":"Accelerators only become productive when they sit in powered, permitted, connected sites.","claimIds":["site_constraints","financing_bifurcation","compute_opp_cost"]},{"source":"accelerators","target":"orbital_compute","value":10,"summary":"Extreme accelerator demand keeps orbital compute alive as an option on terrestrial scarcity.","claimIds":["orbital_option","orbital_not_base","site_constraints"]},{"source":"memory_storage","target":"power_cooling","value":8,"summary":"Memory and storage tiers add power, cooling, and rack-layout pressure.","claimIds":["long_context_memory","power_density"]},{"source":"memory_storage","target":"sites_fiber_permits","value":10,"summary":"Larger storage/cache layers require datacenter designs with the right space, power, and network access.","claimIds":["site_constraints","kv_compression"]},{"source":"networking_optics","target":"power_cooling","value":8,"summary":"Networking equipment itself becomes a meaningful power and cooling load.","claimIds":["network_power","power_density"]},{"source":"networking_optics","target":"sites_fiber_permits","value":12,"summary":"Network-heavy AI sites need fiber routes, latency planning, and reliable interconnects.","claimIds":["network_power","site_constraints"]},{"source":"networking_optics","target":"orbital_compute","value":6,"summary":"Orbital compute depends on optical links and network architecture as much as launch economics.","claimIds":["orbital_option","network_power"]},{"source":"power_cooling","target":"electricity","value":34,"summary":"Power delivery and cooling translate AI growth into electricity and generation demand.","claimIds":["commodities_pass","site_constraints","power_density"]},{"source":"power_cooling","target":"copper_power_elec","value":22,"summary":"Dense AI facilities pull on copper, transformers, switchgear, power electronics, and grid equipment.","claimIds":["power_density","commodities_pass"]},{"source":"power_cooling","target":"construction_finance","value":14,"summary":"Power and cooling upgrades require construction execution and project financing.","claimIds":["financing_bifurcation","commodities_pass"]},{"source":"sites_fiber_permits","target":"fiber_optics_lasers","value":16,"summary":"Site selection and AI networking create demand for dark fiber, optics, and lasers.","claimIds":["network_power","site_constraints","commodities_pass"]},{"source":"sites_fiber_permits","target":"construction_finance","value":16,"summary":"Land, water, permits, and interconnect timelines make construction and financing central.","claimIds":["site_constraints","financing_bifurcation","neocloud_contracts"]},{"source":"sites_fiber_permits","target":"electricity","value":6,"summary":"Sites are valuable when they solve power access, not just when they have land.","claimIds":["site_constraints","commodities_pass"]},{"source":"orbital_compute","target":"launch_space_inputs","value":12,"summary":"Orbital compute would concentrate spend in launch, solar arrays, thermal systems, and space assembly.","claimIds":["orbital_option","orbital_not_base"]},{"source":"orbital_compute","target":"fiber_optics_lasers","value":4,"summary":"Space datacenters would need high-throughput optical links back to Earth and between orbital assets.","claimIds":["orbital_option","network_power"]}],"themes":[{"title":"1. Demand ownership beats model ownership","ramification":"Capacity flows to products with direct revenue, accounts, and workflow control. Generic model access loses power unless it is tied to distribution, enterprise context, or proprietary workflows.","sourceIds":["compute_alloc","openai_moat","thin_apps"]},{"title":"2. Enterprises build private hill-climbing loops","ramification":"AI budgets shift toward evals, governance, routing, telemetry, private-data integration, and feedback loops. The winning vendors look like measured-work platforms, not chatbot vendors.","sourceIds":["ms_platform"]},{"title":"3. Thin AI apps get absorbed","ramification":"Horizontal wrappers around writing, coding, images, and generic agents face bundling pressure from labs and platforms. Vertical systems with permissions, records, compliance, and integrations become more valuable.","sourceIds":["thin_apps","ms_platform"]},{"title":"4. Compute becomes portfolio allocation","ramification":"Free consumer usage gets throttled first. Priority routing goes to enterprise agents, coding/security work, long-running workflows, and committed-spend customers.","sourceIds":["compute_alloc","jevons"]},{"title":"5. Cheaper tokens raise total load","ramification":"Lower per-token cost unlocks more loops, retries, tool calls, and long-context usage. Unit cost falls, but aggregate infrastructure demand rises unless AI demand saturates.","sourceIds":["jevons","deepseek"]},{"title":"6. The bottleneck moves from chips to deployment","ramification":"Scarcity rotates through power interconnects, cooling, transformers, rack density, fiber, water, permits, and construction execution. A GPU without a powered site is stranded capacity.","sourceIds":["site_power","power_delivery","networking"]},{"title":"7. Nvidia stays strong, but mix matters","ramification":"Full-system ACIE demand supports Nvidia’s moat. Hyperscaler demand is huge but more substitution-prone. Watch networking, custom silicon, systems attach, and non-CUDA software progress.","sourceIds":["nvidia","deepseek","networking"]},{"title":"8. Neoclouds split into winners and casualties","ramification":"Operators with power, offtake, financing, utilisation, and credible residual assumptions scale. Weakly contracted GPU lessors become fragile as depreciation and cancellation risk show up.","sourceIds":["neocloud","site_power"]},{"title":"9. Cyber agents raise the defensive bar","ramification":"Exploit research gets faster and noisier. Spend shifts toward isolation, sandboxing, memory safety, runtime controls, safer rollout systems, and AI-assisted triage — not patching alone.","sourceIds":["cyber"]},{"title":"10. Search and the open web get repriced","ramification":"AI answer surfaces reduce referral traffic and pull intent capture inside assistants. Expect publisher fights, content deals, agent-commerce experiments, and pressure on the old search-ad bargain.","sourceIds":["google_search","openai_moat"]}]}</script>
+  <script>
+    const DATA = JSON.parse(document.getElementById('app-data').textContent);
+    const sourceById = new Map(DATA.sources.map(d => [d.id, d]));
+    const claimById = new Map(DATA.claims.map(d => [d.id, d]));
+
+    const groupColors = new Map([
+      ['Demand owners', '#0f766e'],
+      ['Monetisation', '#2563eb'],
+      ['Token workloads', '#7c3aed'],
+      ['Compute layer', '#c2410c'],
+      ['Hardware', '#be123c'],
+      ['Facilities', '#475569'],
+      ['Commodities / primitives', '#047857']
+    ]);
+
+    const svg = d3.select('#sankey');
+    const tooltip = d3.select('#tooltip');
+    let selected = null;
+    let renderTimer;
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    }
+
+    function shortSourceTitle(source) {
+      return source.shortTitle || source.title;
+    }
+
+    function claimHtml(claimIds) {
+      const ids = [...new Set(claimIds || [])];
+      if (!ids.length) return '<p class="note">No claims mapped to this segment.</p>';
+      return `<ul class="claim-list">${ids.map(id => {
+        const claim = claimById.get(id);
+        if (!claim) return '';
+        const links = claim.sources.map(sid => {
+          const source = sourceById.get(sid);
+          return source ? `<a class="source-link" target="_blank" rel="noopener" href="${source.url}">${escapeHtml(shortSourceTitle(source))}</a>` : '';
+        }).join('');
+        return `<li class="claim-item"><p class="claim-text">${escapeHtml(claim.text)}</p><div class="source-links">${links}</div></li>`;
+      }).join('')}</ul>`;
+    }
+
+    function tooltipHtml(kind, d) {
+      const title = kind === 'link' ? `${d.source.label} → ${d.target.label}` : d.label;
+      const claims = (d.claimIds || []).slice(0, 2).map(id => claimById.get(id)?.text).filter(Boolean);
+      const layerLine = kind === 'node' ? `<div>${escapeHtml(d.group)}</div>` : '';
+      return `<strong>${escapeHtml(title)}</strong>${layerLine}<div>${escapeHtml(d.summary || '')}</div>${claims.length ? `<ul>${claims.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul>` : ''}<div class="hint">Click for full claims + links</div>`;
+    }
+
+    function setDetail(kind, d) {
+      selected = { kind, id: kind === 'link' ? `${d.source.id}->${d.target.id}` : d.id };
+      const title = kind === 'link' ? `${d.source.label} → ${d.target.label}` : d.label;
+      const kicker = kind === 'link' ? 'Selected flow segment' : 'Selected node';
+      const stat = kind === 'node' ? `<div class="mini-stat">Layer: <strong>${escapeHtml(d.group)}</strong></div>` : '';
+      document.getElementById('detail-panel').innerHTML = `
+        <div class="detail-kicker">${kicker}</div>
+        <h2>${escapeHtml(title)}</h2>
+        ${stat}
+        <p class="detail-summary">${escapeHtml(d.summary || '')}</p>
+        <div class="detail-kicker">Claims behind this segment</div>
+        ${claimHtml(d.claimIds)}
+      `;
+      applySelectionStyles();
+    }
+
+    function applySelectionStyles() {
+      if (!selected) return;
+      d3.selectAll('.link').classed('selected', function(d) {
+        return selected.kind === 'link' && selected.id === `${d.source.id}->${d.target.id}`;
+      });
+      d3.selectAll('.node').classed('selected', function(d) {
+        return selected.kind === 'node' && selected.id === d.id;
+      });
+    }
+
+    function showTooltip(event, kind, d) {
+      tooltip.html(tooltipHtml(kind, d)).style('opacity', 1);
+      moveTooltip(event);
+    }
+    function moveTooltip(event) {
+      const x = Math.min(window.innerWidth - 190, Math.max(190, event.clientX));
+      const y = Math.max(120, event.clientY);
+      tooltip.style('left', `${x}px`).style('top', `${y}px`);
+    }
+    function hideTooltip() { tooltip.style('opacity', 0); }
+
+    function renderLegend() {
+      const el = document.getElementById('legend');
+      el.innerHTML = [...groupColors.entries()].map(([group, color]) =>
+        `<span class="pill"><span class="dot" style="background:${color}"></span>${escapeHtml(group.replace(' / primitives',''))}</span>`
+      ).join('');
+    }
+
+    function renderSankey() {
+      const container = document.getElementById('sankey');
+      const box = container.getBoundingClientRect();
+      const width = Math.max(980, box.width || 1400);
+      const height = Math.max(680, box.height || 705);
+      svg.selectAll('*').remove();
+      svg.attr('viewBox', `0 0 ${width} ${height}`);
+
+      const margin = {top: 28, right: 152, bottom: 18, left: 18};
+      const graph = {
+        nodes: DATA.nodes.map(d => ({...d})),
+        links: DATA.links.map(d => ({...d}))
+      };
+
+      const sankey = d3.sankey()
+        .nodeId(d => d.id)
+        .nodeAlign(d3.sankeyJustify)
+        .nodeWidth(17)
+        .nodePadding(width > 1350 ? 20 : 17)
+        .extent([[margin.left, margin.top], [width - margin.right, height - margin.bottom]])
+        .iterations(48);
+
+      sankey(graph);
+
+      const defs = svg.append('defs');
+      graph.links.forEach((d, i) => {
+        const grad = defs.append('linearGradient')
+          .attr('id', `grad-${i}`)
+          .attr('gradientUnits', 'userSpaceOnUse')
+          .attr('x1', d.source.x1)
+          .attr('x2', d.target.x0);
+        grad.append('stop').attr('offset', '0%').attr('stop-color', groupColors.get(d.source.group) || '#64748b');
+        grad.append('stop').attr('offset', '100%').attr('stop-color', groupColors.get(d.target.group) || '#64748b');
+      });
+
+      svg.append('g')
+        .attr('fill', 'none')
+        .selectAll('path')
+        .data(graph.links)
+        .join('path')
+          .attr('class', 'link')
+          .attr('d', d3.sankeyLinkHorizontal())
+          .attr('stroke', (d, i) => `url(#grad-${i})`)
+          .attr('stroke-width', d => Math.max(1, d.width))
+          .on('mouseover', (event, d) => showTooltip(event, 'link', d))
+          .on('mousemove', moveTooltip)
+          .on('mouseout', hideTooltip)
+          .on('click', (event, d) => {
+            event.stopPropagation();
+            setDetail('link', d);
+          });
+
+      const node = svg.append('g')
+        .selectAll('g')
+        .data(graph.nodes)
+        .join('g')
+          .attr('class', 'node')
+          .on('mouseover', (event, d) => showTooltip(event, 'node', d))
+          .on('mousemove', moveTooltip)
+          .on('mouseout', hideTooltip)
+          .on('click', (event, d) => {
+            event.stopPropagation();
+            setDetail('node', d);
+          });
+
+      node.append('rect')
+        .attr('x', d => d.x0)
+        .attr('y', d => d.y0)
+        .attr('height', d => Math.max(1, d.y1 - d.y0))
+        .attr('width', d => d.x1 - d.x0)
+        .attr('rx', 4)
+        .attr('fill', d => groupColors.get(d.group) || '#64748b');
+
+      const finalColumnX = d3.max(graph.nodes, d => d.x0);
+      const label = node.append('text')
+        .attr('class', 'node-label')
+        .attr('x', d => d.x1 + 8)
+        .attr('y', d => (d.y0 + d.y1) / 2)
+        .attr('dy', '0.35em')
+        .attr('text-anchor', 'start')
+        .text(d => d.label);
+
+      label.each(function(d) {
+        const text = d3.select(this);
+        const words = d.label.split(/\s+/).reverse();
+        const lineHeight = 1.12;
+        const x = text.attr('x');
+        const y = text.attr('y');
+        const isLast = Math.abs(d.x0 - finalColumnX) < 2;
+        const maxWidth = isLast ? Math.max(105, margin.right - 18) : (width > 1300 ? 185 : 150);
+        let word, line = [], lineNumber = 0;
+        text.text(null);
+        let tspan = text.append('tspan').attr('x', x).attr('y', y).attr('dy', '0.35em');
+        while ((word = words.pop())) {
+          line.push(word);
+          tspan.text(line.join(' '));
+          if (tspan.node().getComputedTextLength() > maxWidth && line.length > 1) {
+            line.pop();
+            tspan.text(line.join(' '));
+            line = [word];
+            tspan = text.append('tspan').attr('x', x).attr('y', y).attr('dy', `${++lineNumber * lineHeight + 0.35}em`).text(word);
+          }
+        }
+        const tspans = text.selectAll('tspan');
+        const shift = -(tspans.size() - 1) * 6.2;
+        tspans.attr('dy', function(_, i) { return i === 0 ? `${shift}px` : '1.12em'; });
+      });
+
+      const columns = d3.rollups(graph.nodes, v => d3.min(v, d => d.x0), d => Math.round(d.x0))
+        .map(([x]) => x)
+        .sort((a,b) => a-b);
+      const columnNames = ['Demand owners','Monetisation','Token workloads','Compute','Hardware','Facilities','Commodities'];
+      svg.append('g').selectAll('text')
+        .data(columns.map((x, i) => ({x, label: columnNames[i] || ''})))
+        .join('text')
+        .attr('class','node-group-label')
+        .attr('x', d => d.x)
+        .attr('y', 14)
+        .text(d => d.label);
+
+      applySelectionStyles();
+    }
+
+    function renderSources() {
+      const el = document.getElementById('source-library');
+      el.innerHTML = DATA.sources.map(s => {
+        const fallback = s.sourceType === 'clarity-fallback';
+        const clarity = fallback ? '' : `<a class="secondary-link" target="_blank" rel="noopener" href="${s.clarityUrl}">Clarity summary</a>`;
+        const meta = fallback ? 'PDF/source not externally linkable here; using ClarityReader summary.' : 'Primary source link, plus PICA summary.';
+        return `<article class="source-card"><a class="primary-source" href="${s.url}" target="_blank" rel="noopener">${escapeHtml(s.title)}</a><div class="source-meta">${escapeHtml(meta)}</div>${clarity}</article>`;
+      }).join('');
+    }
+
+    function renderThemes() {
+      const el = document.getElementById('theme-grid');
+      el.innerHTML = DATA.themes.map(t => {
+        const links = t.sourceIds.map(id => {
+          const s = sourceById.get(id);
+          return s ? `<a class="source-link" target="_blank" rel="noopener" href="${s.url}">${escapeHtml(shortSourceTitle(s))}</a>` : '';
+        }).join('');
+        return `<article class="theme-card"><h2>${escapeHtml(t.title)}</h2><p>${escapeHtml(t.ramification)}</p><div class="source-links">${links}</div></article>`;
+      }).join('');
+    }
+
+    function setupTabs() {
+      document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-button').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+          document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === btn.dataset.tab));
+          if (btn.dataset.tab === 'sankey-tab') setTimeout(renderSankey, 0);
+        });
+      });
+    }
+
+    renderLegend();
+    renderSources();
+    renderThemes();
+    setupTabs();
+    renderSankey();
+    window.addEventListener('resize', () => {
+      clearTimeout(renderTimer);
+      renderTimer = setTimeout(renderSankey, 160);
+    });
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#sankey') && !e.target.closest('#detail-panel')) hideTooltip();
+    });
+  </script>
+</body>
+</html>
