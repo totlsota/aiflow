@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Silicon supply chain — from raw commodities to AI compute</title>
+  <meta name="description" content="A dependency Sankey tracing raw commodities, gases, chemicals, power and water up through ASML/ZEISS lithography, TSMC fabs and advanced packaging into AI accelerator capacity." />
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+      --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 32rem),
+        linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell { width: min(1860px, calc(100vw - 36px)); margin: 0 auto; padding: 22px 0 28px; }
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: start;
+      margin-bottom: 16px;
+    }
+    .eyebrow {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--muted);
+      font-weight: 850;
+      margin-bottom: 8px;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 3.7vw, 52px);
+      line-height: 0.98;
+      letter-spacing: -0.055em;
+    }
+    .subhead {
+      margin: 12px 0 0;
+      max-width: 980px;
+      color: #334155;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    .meta {
+      justify-self: end;
+      min-width: 260px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.78);
+      padding: 14px;
+      box-shadow: 0 6px 24px rgba(15, 23, 42, 0.05);
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .meta strong { color: var(--ink); }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+      margin: 18px 0 20px;
+      flex-wrap: wrap;
+    }
+    .tab-button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 12px 14px;
+      font: inherit;
+      font-weight: 780;
+      border-radius: 12px 12px 0 0;
+      cursor: pointer;
+    }
+    .tab-button[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .sankey-layout {
+      display: grid;
+      grid-template-columns: minmax(980px, 1fr) minmax(320px, 370px);
+      gap: 18px;
+      align-items: start;
+    }
+    .chart-card, .detail-card, .theme-card, .source-card {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .chart-card { padding: 14px; overflow: hidden; min-height: 755px; }
+    .chart-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 2px 4px 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .legend { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #fff;
+      white-space: nowrap;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    #sankey { width: 100%; height: 705px; display: block; }
+    .node rect {
+      cursor: pointer;
+      stroke: rgba(15, 23, 42, 0.18);
+      stroke-width: 1;
+      shape-rendering: crispEdges;
+    }
+    .node-label {
+      fill: #0f172a;
+      font-size: 12px;
+      font-weight: 740;
+      letter-spacing: -0.012em;
+      stroke: none !important;
+      text-shadow: none !important;
+      paint-order: normal;
+      pointer-events: none;
+    }
+    .node-group-label {
+      fill: #64748b;
+      font-size: 10px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      stroke: none !important;
+      pointer-events: none;
+    }
+    .link {
+      fill: none;
+      stroke-opacity: 0.34;
+      cursor: pointer;
+      mix-blend-mode: multiply;
+    }
+    .link:hover { stroke-opacity: 0.64; }
+    .link.selected { stroke-opacity: 0.80; }
+    .node.selected rect { stroke: var(--ink); stroke-width: 2; }
+    .detail-card {
+      padding: 18px;
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+    .detail-kicker {
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 850;
+      margin-bottom: 8px;
+    }
+    .detail-card h2 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      line-height: 1.08;
+      letter-spacing: -0.04em;
+    }
+    .detail-summary { color: #334155; line-height: 1.5; margin: 0 0 16px; }
+    .claim-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+    .claim-item {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: #f8fafc;
+    }
+    .claim-text { margin: 0 0 8px; font-size: 14px; line-height: 1.45; }
+    .source-links { display: flex; flex-wrap: wrap; gap: 6px; }
+    .source-link {
+      font-size: 11px;
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border-radius: 999px;
+      padding: 4px 7px;
+      font-weight: 760;
+    }
+    .secondary-link {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .mini-stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0 0 12px;
+    }
+    .tooltip {
+      position: fixed;
+      z-index: 20;
+      max-width: 380px;
+      pointer-events: none;
+      background: rgba(15, 23, 42, 0.96);
+      color: white;
+      border-radius: 14px;
+      padding: 12px 13px;
+      box-shadow: 0 18px 44px rgba(15,23,42,.28);
+      opacity: 0;
+      transform: translate(-50%, calc(-100% - 12px));
+      transition: opacity .08s ease;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .tooltip strong { display: block; font-size: 13px; margin-bottom: 5px; }
+    .tooltip ul { margin: 8px 0 0 17px; padding: 0; color: #dbeafe; }
+    .tooltip .hint { margin-top: 8px; color: #bfdbfe; font-weight: 720; }
+    .theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .theme-card { padding: 18px; }
+    .theme-card h2 { margin: 0 0 8px; font-size: 19px; letter-spacing: -0.03em; }
+    .theme-card p { margin: 0 0 12px; color: #334155; line-height: 1.5; }
+    .source-library {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .source-card { padding: 12px; font-size: 13px; box-shadow: none; display: grid; gap: 7px; }
+    .source-card a.primary-source { font-weight: 780; color: var(--ink); }
+    .source-card .source-meta { color: var(--muted); font-size: 11px; }
+    .note { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 14px 0 0; }
+    .site-nav { display:flex; gap:8px; margin:0 0 14px; flex-wrap:wrap; }
+    .site-nav a { font-size:13px; font-weight:780; color:var(--muted); padding:8px 15px; border:1px solid var(--line); border-radius:999px; background:#fff; }
+    .site-nav a.active { color:#fff; background:var(--accent); border-color:var(--accent); }
+    .site-nav a:hover { text-decoration:none; border-color:var(--accent); }
+    @media (max-width: 1320px) {
+      header, .sankey-layout { grid-template-columns: 1fr; }
+      .meta { justify-self: stretch; }
+      .detail-card { position: relative; top: auto; max-height: none; }
+      .source-library { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #sankey { height: 760px; }
+      .chart-card { min-height: 805px; }
+    }
+    @media (max-width: 820px) {
+      .shell { width: min(100% - 22px, 100%); padding-top: 14px; }
+      .chart-card { padding: 10px; overflow-x: auto; }
+      .chart-toolbar { align-items: flex-start; flex-direction: column; }
+      #sankey { min-width: 980px; height: 850px; }
+      .node-label { font-size: 10.5px; }
+      .theme-grid, .source-library { grid-template-columns: 1fr; }
+    }
+  </style>
+  
+<style>
+  .site-nav { display:flex; gap:8px; margin:0 0 14px; flex-wrap:wrap; }
+  .site-nav a { font-size:13px; font-weight:780; color:var(--muted); padding:8px 15px; border:1px solid var(--line); border-radius:999px; background:#fff; }
+  .site-nav a.active { color:#fff; background:var(--accent); border-color:var(--accent); }
+  .site-nav a:hover { text-decoration:none; border-color:var(--accent); }
+  .score-pill { font-size:11px; font-weight:800; border-radius:999px; padding:3px 9px; border:1px solid; display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+  .s5 { background:#fef2f2; color:#b91c1c; border-color:#fecaca; }
+  .s4 { background:#fff7ed; color:#c2410c; border-color:#fed7aa; }
+  .s3 { background:#fefce8; color:#a16207; border-color:#fde68a; }
+  .s2 { background:#f0fdf4; color:#15803d; border-color:#bbf7d0; }
+  .s1 { background:#f1f5f9; color:#475569; border-color:#e2e8f0; }
+  .detail-meta-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 12px; }
+  .detail-type { font-size:11px; font-weight:780; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .commodity-line { font-size:12.5px; color:var(--muted); margin:0 0 12px; }
+  .commodity-line strong { color:var(--ink); }
+  .theme-card .theme-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  .theme-card .impacted { font-size:12px; color:var(--muted); margin:2px 0 10px; font-weight:680; }
+  .meta { max-width:360px; }
+  #sankey { height:1480px; }
+  .chart-card { min-height:1520px; }
+  @media (max-width:1320px){ #sankey{height:1520px;} .chart-card{min-height:1560px;} }
+  @media (max-width:820px){ #sankey{min-width:1080px; height:1700px;} }
+</style>
+
+</head><body>
+  <div class="shell">
+    <nav class="site-nav" aria-label="Pages">
+      <a href="/">AI demand chain</a>
+      <a href="/chips" class="active" aria-current="page">Silicon supply chain</a>
+    </nav>
+    <header>
+      <div>
+        <div class="eyebrow">Silicon supply chain</div>
+        <h1>From raw commodities to AI compute.</h1>
+        <p class="subhead">How tin, silicon, rare gases, power and water flow up through qualified materials, ASML/ZEISS lithography, TSMC fabs and advanced packaging into deployable AI accelerator capacity — and where the real bottlenecks sit. Click any node or flow to inspect the dependency and its source.</p>
+      </div>
+      <aside class="meta">
+        <strong>Sources:</strong> ASML &amp; TSMC filings, ZEISS / TRUMPF / Shin-Etsu / SUMCO / Cymer disclosures, and OECD / SIA / USITC / EU-JRC analysis. Weights are <strong>strategic bottleneck scores (1–5)</strong>, not tonnage or dollar flows.
+      </aside>
+    </header>
+
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab-button" data-tab="map-tab" aria-selected="true">Dependency map</button>
+      <button class="tab-button" data-tab="bottlenecks-tab" aria-selected="false">Top bottlenecks</button>
+    </nav>
+
+    <main>
+      <section id="map-tab" class="tab-panel active">
+        <div class="sankey-layout">
+          <section class="chart-card">
+            <div class="chart-toolbar">
+              <div><strong>How to read it:</strong> raw commodities and utilities on the left feed rightward through qualified materials, ASML/ZEISS lithography, TSMC fabs and advanced packaging into AI accelerator capacity. Thicker flows = higher bottleneck score.</div>
+              <div class="legend" id="legend"></div>
+            </div>
+            <svg id="sankey" role="img" aria-label="Sankey diagram mapping AI accelerator capacity to upstream commodities"></svg>
+          </section>
+          <aside id="detail-panel" class="detail-card" aria-live="polite">
+            <div class="detail-kicker">Selected dependency</div>
+            <h2>Click a node or flow</h2>
+            <p class="detail-summary">The rationale, bottleneck score, and source for the selected node or dependency will appear here. Hover gives a compact tooltip; click gives the full detail.</p>
+          </aside>
+        </div>
+        <h2 style="margin: 26px 0 10px; letter-spacing: -0.03em;">Source library</h2>
+        <div id="source-library" class="source-library"></div>
+      </section>
+
+      <section id="bottlenecks-tab" class="tab-panel">
+        <p class="note" style="margin:0 0 16px; max-width:900px;">Opinionated ranking by direct AI leverage, substitutability, single/limited-source exposure, and qualification difficulty. The real moat is purity and qualification: an available bulk commodity is not usable semiconductor-grade supply.</p>
+        <div id="theme-grid" class="theme-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="tooltip" class="tooltip"></div>
+  <script id="app-data" type="application/json">{"sources": [{"id": "asml-annual-report-2025-sec-html", "name": "ASML Annual Report 2025 (SEC HTML)", "url": "https://www.sec.gov/Archives/edgar/data/937966/000162828026011377/asml-2025xannualxreportx.htm", "type": "Primary company filing", "points": "Supplier counts, limited/single-source risk, Carl Zeiss SMT dependency, steel/aluminum/rare earth discussion."}, {"id": "asml-euv-systems", "name": "ASML EUV systems", "url": "https://www.asml.com/en/products/euv-lithography-systems", "type": "Primary company technical page", "points": "13.5nm EUV source, tin droplets, vacuum light path, wafer stage precision."}, {"id": "asml-lenses-and-mirrors", "name": "ASML lenses and mirrors", "url": "https://www.asml.com/en/technology/lithography-principles/lenses-and-mirrors", "type": "Primary company technical page", "points": "ZEISS optics relationship, EUV mirrors and multilayer coatings."}, {"id": "asml-robust-supply-chain", "name": "ASML robust supply chain", "url": "https://www.asml.com/en/news/stories/2023/6-ingredients-robust-supply-chain", "type": "Primary company article", "points": "80% BOM manufactured by suppliers, rare-earth magnet discussion, ZEISS lens supply."}, {"id": "trumpf-euv-drive-laser", "name": "TRUMPF EUV drive laser", "url": "https://www.trumpf.com/en_INT/solutions/applications/euv-lithography/euv-drive-laser/", "type": "Supplier technical page", "points": "High-power CO2 laser and tin-droplet EUV source details."}, {"id": "zeiss-euv-lithography", "name": "ZEISS EUV lithography", "url": "https://www.zeiss.com/semiconductor-manufacturing-technology/inspiring-technology/euv-lithography.html", "type": "Supplier technical page", "points": "Molybdenum/silicon mirror layers and EUV absorption/vacuum logic."}, {"id": "asml-cymer", "name": "ASML Cymer", "url": "https://www.asml.com/en/company/about-asml/cymer", "type": "Primary company page", "points": "ArF/KrF excimer DUV laser product portfolio."}, {"id": "tsmc-2025-20-f", "name": "TSMC 2025 20-F", "url": "https://investor.tsmc.com/sites/ir/sec-filings/2025_20F%20Report.pdf", "type": "Primary company filing", "points": "Raw materials: silicon wafers, gases, chemicals, photoresist; limited-source suppliers; equipment dependencies."}, {"id": "tsmc-annual-report-2025", "name": "TSMC Annual Report 2025", "url": "https://investor.tsmc.com/static/annualReports/2025/english/index.html", "type": "Primary company annual report", "points": "AI/HPC demand, advanced nodes and advanced packaging context."}, {"id": "tsmc-cowos", "name": "TSMC CoWoS", "url": "https://3dfabric.tsmc.com/english/dedicatedFoundry/technology/cowos.htm", "type": "Primary company technical page", "points": "CoWoS-S for AI/HPC, silicon interposer and HBM cubes."}, {"id": "tsmc-annual-report-chapter-7", "name": "TSMC Annual Report Chapter 7", "url": "https://investor.tsmc.com/static/annualReports/2025/english/pdf/2025_tsmc_ar_e_ch7.pdf", "type": "Primary company ESG chapter", "points": "Gas categories in greenhouse-gas disclosures; upstream/downstream ecosystem language."}, {"id": "tsmc-green-power-report", "name": "TSMC green power report", "url": "https://esg.tsmc.com/en-US/file/public/e-APractitionerofGreenPower_1.pdf", "type": "Primary company ESG report", "points": "2024 energy consumption: 27,456 GWh total, 93% purchased electricity."}, {"id": "shin-etsu-silicon-wafers", "name": "Shin-Etsu silicon wafers", "url": "https://www.shinetsu.co.jp/en/products/electronics-materials/silicon-wafers/", "type": "Supplier materials page", "points": "Silica/quartz to silicon metal, polysilicon and wafers."}, {"id": "sumco-wafers", "name": "SUMCO wafers", "url": "https://www.sumcosi.com/english/products/lineup.html", "type": "Supplier materials page", "points": "Monocrystalline silicon ingots and 300mm wafers."}, {"id": "sia-semiconductor-supply-chain", "name": "SIA semiconductor supply chain", "url": "https://www.semiconductors.org/wp-content/uploads/2021/04/4.5.21-SIA-supply-chain-submission.pdf", "type": "Industry association report", "points": "Semiconductor fab materials categories and switching/qualification difficulty."}, {"id": "oecd-semiconductor-value-chain", "name": "OECD semiconductor value chain", "url": "https://www.oecd.org/content/dam/oecd/en/publications/reports/2025/06/mapping-the-semiconductor-value-chain_5ba52971/4154cdbf-en.pdf", "type": "Intergovernmental report", "points": "Material segments and examples including sputtering-target metals."}, {"id": "usitc-ukraine-neon", "name": "USITC Ukraine neon", "url": "https://www.usitc.gov/publications/332/executive_briefings/ebot_decarlo_goodman_ukraine_neon_and_semiconductors.pdf", "type": "Government analysis", "points": "Neon supply chain and semiconductor laser exposure."}, {"id": "eu-jrc-rare-gases", "name": "EU JRC rare gases", "url": "https://publications.jrc.ec.europa.eu/repository/handle/JRC130349", "type": "EU research report", "points": "Rare gases including neon/krypton/xenon and geopolitical disruption risk."}, {"id": "3m-cmp-materials", "name": "3M CMP materials", "url": "https://www.3m.co.uk/3M/en_GB/semiconductor-uk/solutions/cmp-materials/", "type": "Supplier technical page", "points": "CMP slurry, pad and conditioner materials."}], "groupOrder": ["AI compute", "Advanced packaging", "Fab process", "Lithography systems", "Precision optics & source", "Qualified materials", "Raw commodities", "Utilities & energy"], "nodes": [{"id": "high-purity-quartz-silica", "label": "High-purity quartz / silica", "group": "Raw commodities", "summary": "The root feedstock for silicon wafers and for silicon mirror layers.", "sourceIds": ["asml-robust-supply-chain", "shin-etsu-silicon-wafers"]}, {"id": "semiconductor-grade-silicon-feedstock", "label": "Semiconductor-grade silicon feedstock", "group": "Qualified materials", "summary": "~11N polysilicon and monocrystalline ingots; the purified bridge from silica to wafers.", "sourceIds": ["shin-etsu-silicon-wafers", "tsmc-2025-20-f", "zeiss-euv-lithography"]}, {"id": "300mm-silicon-wafers", "label": "300mm silicon wafers", "group": "Qualified materials", "summary": "TSMC calls silicon wafers its most important raw material; qualified suppliers are limited.", "sourceIds": ["tsmc-2025-20-f", "tsmc-cowos"]}, {"id": "tsmc-leading-edge-wafer-fabs", "label": "TSMC leading-edge wafer fabs", "group": "Fab process", "summary": "The front-end engine: hundreds of qualified steps convert wafers into leading-edge logic. Every input below feeds it.", "sourceIds": ["3m-cmp-materials", "tsmc-2025-20-f", "tsmc-annual-report-2025", "tsmc-green-power-report"]}, {"id": "duv-optical-materials", "label": "DUV optical materials", "group": "Precision optics & source", "summary": "Ultra-pure fused silica and calcium fluoride for DUV lenses.", "sourceIds": ["asml-robust-supply-chain"]}, {"id": "zeiss-duv-optics-lenses", "label": "ZEISS DUV optics / lenses", "group": "Precision optics & source", "summary": "ZEISS precision optics for DUV scanners.", "sourceIds": ["asml-cymer", "asml-robust-supply-chain"]}, {"id": "asml-duv-lithography-systems", "label": "ASML DUV lithography systems", "group": "Lithography systems", "summary": "193nm/248nm scanners still required for many layers even in leading-edge flows.", "sourceIds": ["asml-annual-report-2025-sec-html", "asml-cymer", "asml-robust-supply-chain", "tsmc-2025-20-f"]}, {"id": "argon-krypton-fluorine-gases", "label": "Argon / krypton / fluorine gases", "group": "Raw commodities", "summary": "Excimer laser gas inputs for DUV light sources.", "sourceIds": ["asml-cymer"]}, {"id": "arf-krf-excimer-laser-gas-mix", "label": "ArF / KrF excimer laser gas mix", "group": "Precision optics & source", "summary": "Argon/krypton/fluorine plus rare-gas mixes that lase the DUV light source.", "sourceIds": ["asml-cymer", "usitc-ukraine-neon"]}, {"id": "neon-krypton-xenon-rare-gas-supply", "label": "Neon / krypton / xenon rare-gas supply", "group": "Raw commodities", "summary": "Rare gases (esp. neon) for lithography lasers; geopolitically concentrated, Ukraine/Russia-exposed.", "sourceIds": ["eu-jrc-rare-gases", "usitc-ukraine-neon"]}, {"id": "cymer-duv-light-sources", "label": "Cymer DUV light sources", "group": "Precision optics & source", "summary": "ArF/KrF excimer light sources (ASML/Cymer) enabling 193nm/248nm DUV lithography.", "sourceIds": ["asml-cymer"]}, {"id": "tin-sn", "label": "Tin (Sn)", "group": "Raw commodities", "summary": "Root commodity for EUV: tin droplets are the plasma fuel. Critical but a broad global commodity.", "sourceIds": ["asml-euv-systems"]}, {"id": "tin-droplet-targets", "label": "Tin droplet targets", "group": "Precision optics & source", "summary": "Molten tin droplets fired ~50,000 times per second as the EUV plasma target.", "sourceIds": ["asml-euv-systems", "trumpf-euv-drive-laser"]}, {"id": "laser-produced-euv-plasma-source", "label": "Laser-produced EUV plasma source", "group": "Precision optics & source", "summary": "Turns tin plasma into 13.5nm light; source power and uptime gate scanner throughput.", "sourceIds": ["asml-euv-systems", "trumpf-euv-drive-laser"]}, {"id": "high-power-co2-laser-modules", "label": "High-power CO2 laser modules", "group": "Precision optics & source", "summary": "TRUMPF high-power CO2 laser pulses that vaporize tin droplets to drive the EUV plasma.", "sourceIds": ["trumpf-euv-drive-laser"]}, {"id": "asml-euv-high-na-systems", "label": "ASML EUV / High-NA systems", "group": "Lithography systems", "summary": "ASML is the sole maker of EUV/High-NA scanners. A system integrator coordinating ~5,100 suppliers, with many single-sourced modules.", "sourceIds": ["asml-annual-report-2025-sec-html", "asml-euv-systems", "tsmc-2025-20-f"]}, {"id": "molybdenum-mo", "label": "Molybdenum (Mo)", "group": "Raw commodities", "summary": "One of the two metals in EUV Mo/Si multilayer mirrors.", "sourceIds": ["zeiss-euv-lithography"]}, {"id": "mo-si-multilayer-mirror-coatings", "label": "Mo/Si multilayer mirror coatings", "group": "Precision optics & source", "summary": "EUV reflects off molybdenum/silicon multilayer mirrors (up to ~100 layers), not refractive lenses.", "sourceIds": ["asml-lenses-and-mirrors", "zeiss-euv-lithography"]}, {"id": "ultra-flat-mirror-substrates", "label": "Ultra-flat mirror substrates", "group": "Precision optics & source", "summary": "Mirror substrates polished to near-atomic flatness; precision is at the physical limit.", "sourceIds": ["asml-lenses-and-mirrors"]}, {"id": "zeiss-euv-optics-modules", "label": "ZEISS EUV optics modules", "group": "Precision optics & source", "summary": "Carl Zeiss SMT is the sole supplier of critical EUV optical columns. The single hardest dependency in the stack.", "sourceIds": ["asml-annual-report-2025-sec-html", "asml-lenses-and-mirrors"]}, {"id": "rare-earths-nd-pr-dy-tb-etc", "label": "Rare earths (Nd-Pr-Dy-Tb etc.)", "group": "Raw commodities", "summary": "Neodymium/praseodymium/dysprosium/terbium for high-performance magnets; China-concentrated processing.", "sourceIds": ["asml-robust-supply-chain"]}, {"id": "rare-earth-magnet-assemblies", "label": "Rare-earth magnet assemblies", "group": "Precision optics & source", "summary": "High-performance magnets for low-friction precision stages; exposed to China-dominated rare-earth processing.", "sourceIds": ["asml-euv-systems", "asml-robust-supply-chain"]}, {"id": "wafer-reticle-stages-and-mechatronics", "label": "Wafer/reticle stages and mechatronics", "group": "Lithography systems", "summary": "Nanometer-scale motion control sets overlay and throughput; depends on rare-earth magnet assemblies.", "sourceIds": ["asml-euv-systems", "asml-robust-supply-chain"]}, {"id": "steel-iron-ore", "label": "Steel / iron ore", "group": "Raw commodities", "summary": "Dominates scanner and tool mass; precision-fabricated structures.", "sourceIds": ["asml-annual-report-2025-sec-html", "tsmc-2025-20-f"]}, {"id": "machine-frames-and-precision-structures", "label": "Machine frames and precision structures", "group": "Lithography systems", "summary": "Heavy, ultra-stable structures; steel and aluminum dominate scanner mass.", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"id": "aluminum-bauxite", "label": "Aluminum / bauxite", "group": "Raw commodities", "summary": "Scanner/tool structures, sputter targets and packaging conductors.", "sourceIds": ["asml-annual-report-2025-sec-html", "oecd-semiconductor-value-chain", "tsmc-2025-20-f"]}, {"id": "vacuum-pumps-ceramics-seals", "label": "Vacuum pumps / ceramics / seals", "group": "Lithography systems", "summary": "Specialized vacuum modules, ceramics and seals that maintain the EUV light path.", "sourceIds": ["asml-euv-systems"]}, {"id": "high-vacuum-euv-light-path", "label": "High-vacuum EUV light path", "group": "Lithography systems", "summary": "EUV is absorbed by air, so the full source-to-wafer path runs in high vacuum.", "sourceIds": ["asml-euv-systems"]}, {"id": "fluorine-chlorine-sulfur-petrochemical-feedstocks", "label": "Fluorine / chlorine / sulfur / petrochemical feedstocks", "group": "Raw commodities", "summary": "Feedstocks for wet chemicals and fluorinated specialty gases.", "sourceIds": ["tsmc-2025-20-f", "tsmc-annual-report-chapter-7"]}, {"id": "wet-chemicals-and-solvents", "label": "Wet chemicals and solvents", "group": "Qualified materials", "summary": "HF, H2SO4, HCl, H2O2, NH4OH and solvents for etch/clean/strip; ultra-high-purity, often limited-source.", "sourceIds": ["sia-semiconductor-supply-chain", "tsmc-2025-20-f"]}, {"id": "etch-clean-strip-process-steps", "label": "Etch / clean / strip process steps", "group": "Fab process", "summary": "Repeated etch, clean and strip steps that depend on ultra-pure wet chemicals.", "sourceIds": ["sia-semiconductor-supply-chain", "tsmc-2025-20-f"]}, {"id": "nitrogen-hydrogen-argon-helium", "label": "Nitrogen / hydrogen / argon / helium", "group": "Raw commodities", "summary": "Bulk industrial gases separated from air; ubiquitous across the fab.", "sourceIds": ["tsmc-2025-20-f"]}, {"id": "electronic-specialty-gases", "label": "Electronic specialty gases", "group": "Qualified materials", "summary": "N2/H2/Ar/He plus NF3/SF6/PFCs for deposition, etch, purge and chamber clean. Ultra-pure, hazardous, hard to switch.", "sourceIds": ["eu-jrc-rare-gases", "sia-semiconductor-supply-chain", "tsmc-2025-20-f", "tsmc-annual-report-chapter-7"]}, {"id": "deposition-etch-chamber-clean-steps", "label": "Deposition / etch / chamber-clean steps", "group": "Fab process", "summary": "Gas-intensive deposition, etch and chamber-clean operations using specialty electronic gases.", "sourceIds": ["tsmc-2025-20-f", "tsmc-annual-report-chapter-7"]}, {"id": "photoacid-polymer-solvent-precursors", "label": "Photoacid / polymer / solvent precursors", "group": "Raw commodities", "summary": "Specialty polymers, photoacid generators and solvents that constitute photoresist.", "sourceIds": ["tsmc-2025-20-f"]}, {"id": "photoresist-euv-resist", "label": "Photoresist / EUV resist", "group": "Qualified materials", "summary": "EUV/ArF/KrF resists; defectivity gates resolution and yield. Qualification is slow and Japan-concentrated.", "sourceIds": ["sia-semiconductor-supply-chain", "tsmc-2025-20-f"]}, {"id": "lithography-patterning-steps", "label": "Lithography patterning steps", "group": "Fab process", "summary": "The central repeated bottleneck: EUV/DUV patterning defines circuit geometry layer by layer.", "sourceIds": ["sia-semiconductor-supply-chain", "tsmc-2025-20-f"]}, {"id": "photomask-blanks-quartz-substrates", "label": "Photomask blanks / quartz substrates", "group": "Qualified materials", "summary": "Quartz mask blanks and absorber stacks that masks are written onto.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "photomasks-reticles", "label": "Photomasks / reticles", "group": "Qualified materials", "summary": "Per-layer patterning masters; long write/inspect cycle and tight supply base.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "copper", "label": "Copper", "group": "Raw commodities", "summary": "Primary interconnect metal and sputter-target/RDL material.", "sourceIds": ["oecd-semiconductor-value-chain", "tsmc-cowos"]}, {"id": "pvd-sputter-targets-electroplating-chemistries", "label": "PVD sputter targets / electroplating chemistries", "group": "Qualified materials", "summary": "Copper/aluminum targets and plating chemistries for metallization.", "sourceIds": ["oecd-semiconductor-value-chain"]}, {"id": "tungsten", "label": "Tungsten", "group": "Raw commodities", "summary": "Contact/interconnect metal and deposition precursor source.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "cvd-ald-metal-precursors", "label": "CVD / ALD metal precursors", "group": "Qualified materials", "summary": "Tungsten and specialty metal precursors for atomic-layer/chemical-vapor deposition.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "tantalum-titanium", "label": "Tantalum / titanium", "group": "Raw commodities", "summary": "Common barrier/liner sputter-target metals.", "sourceIds": ["oecd-semiconductor-value-chain"]}, {"id": "pvd-sputter-targets-barrier-metals", "label": "PVD sputter targets / barrier metals", "group": "Qualified materials", "summary": "Tantalum/titanium barrier and liner targets for reliable interconnect stacks.", "sourceIds": ["oecd-semiconductor-value-chain"]}, {"id": "cobalt-nickel", "label": "Cobalt / nickel", "group": "Raw commodities", "summary": "Advanced metallization and contact materials.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "advanced-interconnect-contact-materials", "label": "Advanced interconnect / contact materials", "group": "Qualified materials", "summary": "Cobalt/nickel-class materials for advanced contacts and interconnect.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "hafnium-zirconium", "label": "Hafnium / zirconium", "group": "Raw commodities", "summary": "Source metals for high-k gate dielectrics.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "high-k-dielectric-precursors", "label": "High-k dielectric precursors", "group": "Qualified materials", "summary": "Hafnium/zirconium precursors for transistor gate stacks.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "thin-film-deposition-metallization", "label": "Thin-film deposition / metallization", "group": "Fab process", "summary": "Interconnect and thin-film layers built from sputter targets and ALD/CVD precursors.", "sourceIds": ["oecd-semiconductor-value-chain", "sia-semiconductor-supply-chain", "tsmc-2025-20-f"]}, {"id": "gate-stack-formation", "label": "Gate-stack formation", "group": "Fab process", "summary": "Transistor gate stacks built with high-k dielectric precursors; central to node performance.", "sourceIds": ["sia-semiconductor-supply-chain", "tsmc-2025-20-f"]}, {"id": "silica-alumina-ceria-abrasives", "label": "Silica / alumina / ceria abrasives", "group": "Raw commodities", "summary": "Mineral abrasives for CMP slurries; ceria is a rare-earth input.", "sourceIds": ["3m-cmp-materials"]}, {"id": "cmp-slurry-abrasives", "label": "CMP slurry abrasives", "group": "Qualified materials", "summary": "Silica/alumina/ceria slurries; process-qualified and slow to substitute.", "sourceIds": ["3m-cmp-materials"]}, {"id": "polyurethane-diamond-conditioners", "label": "Polyurethane / diamond conditioners", "group": "Raw commodities", "summary": "Polymer and diamond inputs for CMP pads and conditioners.", "sourceIds": ["3m-cmp-materials"]}, {"id": "cmp-pads-pad-conditioners", "label": "CMP pads / pad conditioners", "group": "Qualified materials", "summary": "Polyurethane pads and diamond conditioners consumed in planarization.", "sourceIds": ["3m-cmp-materials"]}, {"id": "cmp-planarization-steps", "label": "CMP planarization steps", "group": "Fab process", "summary": "Chemical-mechanical planarization that enables multilayer stacking; repeated across the flow.", "sourceIds": ["3m-cmp-materials"]}, {"id": "electricity-grid-renewable-ppas", "label": "Electricity grid / renewable PPAs", "group": "Utilities & energy", "summary": "Grid power and renewable PPAs. TSMC used 27,456 GWh in 2024, ~93% purchased electricity.", "sourceIds": ["tsmc-green-power-report"]}, {"id": "tsmc-power-supply", "label": "TSMC power supply", "group": "Utilities & energy", "summary": "Fab power delivery; outages damage wafer lots and cap capacity.", "sourceIds": ["tsmc-green-power-report"]}, {"id": "natural-gas", "label": "Natural gas", "group": "Utilities & energy", "summary": "A smaller part of fab energy than electricity, for power/process-heat backup.", "sourceIds": ["tsmc-green-power-report"]}, {"id": "tsmc-power-process-heat-backup", "label": "TSMC power / process heat backup", "group": "Utilities & energy", "summary": "Backup generation and process-heat supply.", "sourceIds": ["tsmc-green-power-report"]}, {"id": "water-sources", "label": "Water sources", "group": "Utilities & energy", "summary": "Municipal/industrial and reclaimed water feeding ultrapure-water systems.", "sourceIds": ["tsmc-2025-20-f"]}, {"id": "ultrapure-water-systems", "label": "Ultrapure water systems", "group": "Utilities & energy", "summary": "Massive UPW volumes for rinse/clean; local water stress can idle tools or block expansion.", "sourceIds": ["tsmc-2025-20-f"]}, {"id": "etch-deposition-cmp-implant-metrology-tools", "label": "Etch / deposition / CMP / implant / metrology tools", "group": "Lithography systems", "summary": "Non-litho process tools (AMAT/LAM/TEL/KLA-class). The fab ramp fails if any critical tool class lags.", "sourceIds": ["sia-semiconductor-supply-chain", "tsmc-2025-20-f"]}, {"id": "asml-supplier-network", "label": "ASML supplier network", "group": "Lithography systems", "summary": "ASML operates as architect/integrator; ~80% of machine BOM is manufactured by suppliers, many single-sourced.", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"id": "tsmc-qualified-supplier-base", "label": "TSMC qualified supplier base", "group": "Qualified materials", "summary": "Long-term agreements and qualified, often sole/limited-source suppliers for wafers, resist, gases and chemicals.", "sourceIds": ["sia-semiconductor-supply-chain", "tsmc-2025-20-f"]}, {"id": "leading-edge-logic-dies", "label": "Leading-edge logic dies", "group": "Advanced packaging", "summary": "N2/N3/N5 logic dies diced from advanced-node wafers, then fed into advanced packaging.", "sourceIds": ["tsmc-annual-report-2025", "tsmc-cowos"]}, {"id": "tsmc-cowos-3dfabric-advanced-packaging", "label": "TSMC CoWoS / 3DFabric advanced packaging", "group": "Advanced packaging", "summary": "CoWoS-S joins logic chiplets, silicon interposer and HBM cubes. A primary post-fab bottleneck for AI accelerator output.", "sourceIds": ["sia-semiconductor-supply-chain", "tsmc-cowos"]}, {"id": "silicon-interposers-local-silicon-interconnect", "label": "Silicon interposers / local silicon interconnect", "group": "Advanced packaging", "summary": "Large silicon interposers carry the dense die-to-die and die-to-HBM wiring; interposer capacity is a hard CoWoS input.", "sourceIds": ["tsmc-cowos"]}, {"id": "abf-resin-glass-fiber-copper-foil", "label": "ABF resin / glass fiber / copper foil", "group": "Advanced packaging", "summary": "Petrochemical resin, glass fiber and copper foil that constitute high-end package substrates.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "abf-bt-package-substrates", "label": "ABF / BT package substrates", "group": "Advanced packaging", "summary": "High-end organic substrates linking the package to the board; supply-constrained during AI ramps.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "microbumps-rdl-package-wiring", "label": "Microbumps / RDL / package wiring", "group": "Advanced packaging", "summary": "High-density redistribution and microbump interconnect that stitch the package together.", "sourceIds": ["tsmc-cowos"]}, {"id": "precious-metals-au-pd-pt-ag", "label": "Precious metals (Au/Pd/Pt/Ag)", "group": "Raw commodities", "summary": "Gold/palladium/platinum/silver used selectively in bonding, plating and connectors.", "sourceIds": ["tsmc-2025-20-f"]}, {"id": "plating-bonding-connector-materials", "label": "Plating / bonding / connector materials", "group": "Advanced packaging", "summary": "Selective precious-metal plating, bonding and connector materials used in package assembly.", "sourceIds": ["tsmc-2025-20-f", "tsmc-cowos"]}, {"id": "solder-alloys-underfill-thermal-materials", "label": "Solder alloys / underfill / thermal materials", "group": "Advanced packaging", "summary": "Interconnect solder, underfill and thermal-interface materials that hold and cool stacked packages.", "sourceIds": ["tsmc-cowos"]}, {"id": "hbm-dram-ecosystem", "label": "HBM DRAM ecosystem", "group": "Advanced packaging", "summary": "External but tightly-coupled memory supply (mainly Korea/US-linked) feeding HBM cubes.", "sourceIds": ["tsmc-cowos"]}, {"id": "hbm-cubes-memory-stacks", "label": "HBM cubes / memory stacks", "group": "Advanced packaging", "summary": "Stacked DRAM placed beside logic on CoWoS. Most high-end accelerators are not deployable without HBM bandwidth.", "sourceIds": ["tsmc-cowos"]}, {"id": "packaged-ai-accelerators-asics", "label": "Packaged AI accelerators / ASICs", "group": "AI compute", "summary": "Finished accelerator packages (GPU/ASIC + HBM). Output is gated by packaging and substrate capacity, not just wafer starts.", "sourceIds": ["tsmc-annual-report-2025", "tsmc-cowos"]}, {"id": "ai-data-center-capacity", "label": "AI data-center capacity", "group": "AI compute", "summary": "The deployable end state: every upstream constraint shows up here as accelerator availability for training and inference.", "sourceIds": ["tsmc-annual-report-2025"]}, {"id": "ceramics-quartzware-graphite", "label": "Ceramics / quartzware / graphite", "group": "Qualified materials", "summary": "High-purity chambers, liners, chucks and consumables inside process tools.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"id": "custom-semiconductors-controls", "label": "Custom semiconductors / controls", "group": "Lithography systems", "summary": "Sensors, power electronics and FPGAs/ASICs that synchronize control loops across the machine.", "sourceIds": ["asml-annual-report-2025-sec-html", "tsmc-2025-20-f"]}], "links": [{"source": "high-purity-quartz-silica", "target": "semiconductor-grade-silicon-feedstock", "value": 5, "summary": "Quartz/silica is the root feedstock for silicon wafers and silicon mirror layers.", "score": 5, "type": "raw material", "commodity": "silica, silicon", "sourceIds": ["shin-etsu-silicon-wafers"]}, {"source": "semiconductor-grade-silicon-feedstock", "target": "300mm-silicon-wafers", "value": 5, "summary": "TSMC identifies silicon wafers as its most important raw material, with limited supplier base.", "score": 5, "type": "processed material", "commodity": "polysilicon, monocrystalline silicon", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "300mm-silicon-wafers", "target": "tsmc-leading-edge-wafer-fabs", "value": 5, "summary": "Substrate for every leading-edge logic wafer start.", "score": 5, "type": "fab input", "commodity": "silicon wafers", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "high-purity-quartz-silica", "target": "duv-optical-materials", "value": 3, "summary": "DUV lenses depend on ultra-high-purity optical materials and ZEISS optics.", "score": 3, "type": "raw material", "commodity": "fused silica, calcium fluoride", "sourceIds": ["asml-robust-supply-chain"]}, {"source": "duv-optical-materials", "target": "zeiss-duv-optics-lenses", "value": 3, "summary": "ZEISS supplies optics for ASML lithography systems.", "score": 3, "type": "supplier module", "commodity": "optical glass/fused silica/CaF2", "sourceIds": ["asml-robust-supply-chain"]}, {"source": "zeiss-duv-optics-lenses", "target": "asml-duv-lithography-systems", "value": 4, "summary": "DUV scanners remain required for many non-EUV layers.", "score": 4, "type": "equipment module", "commodity": "precision optics", "sourceIds": ["asml-cymer"]}, {"source": "argon-krypton-fluorine-gases", "target": "arf-krf-excimer-laser-gas-mix", "value": 4, "summary": "Cymer DUV light sources use ArF/KrF excimer laser gas chemistry.", "score": 4, "type": "specialty gas", "commodity": "argon, krypton, fluorine", "sourceIds": ["asml-cymer"]}, {"source": "neon-krypton-xenon-rare-gas-supply", "target": "arf-krf-excimer-laser-gas-mix", "value": 4, "summary": "Rare gases, especially neon, are vulnerable in lithography laser supply chains.", "score": 4, "type": "specialty gas", "commodity": "neon, krypton, xenon", "sourceIds": ["usitc-ukraine-neon"]}, {"source": "arf-krf-excimer-laser-gas-mix", "target": "cymer-duv-light-sources", "value": 4, "summary": "DUV light source output is an enabling module of ASML DUV scanners.", "score": 4, "type": "supplier module", "commodity": "excimer laser gases", "sourceIds": ["asml-cymer"]}, {"source": "cymer-duv-light-sources", "target": "asml-duv-lithography-systems", "value": 4, "summary": "DUV laser output enables 193nm/248nm lithography.", "score": 4, "type": "equipment module", "commodity": "lasers", "sourceIds": ["asml-cymer"]}, {"source": "asml-duv-lithography-systems", "target": "tsmc-leading-edge-wafer-fabs", "value": 4, "summary": "Even leading-edge fabs use DUV for many process layers.", "score": 4, "type": "capital equipment", "commodity": "lithography equipment", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "tin-sn", "target": "tin-droplet-targets", "value": 5, "summary": "EUV light is generated from laser-hit tin droplets.", "score": 5, "type": "raw material", "commodity": "tin", "sourceIds": ["asml-euv-systems"]}, {"source": "tin-droplet-targets", "target": "laser-produced-euv-plasma-source", "value": 5, "summary": "Tin droplets are fired tens of thousands of times per second to create EUV plasma.", "score": 5, "type": "consumable / source material", "commodity": "tin droplets", "sourceIds": ["trumpf-euv-drive-laser"]}, {"source": "high-power-co2-laser-modules", "target": "laser-produced-euv-plasma-source", "value": 5, "summary": "TRUMPF high-power CO2 laser pulses drive the EUV plasma source.", "score": 5, "type": "supplier module", "commodity": "CO2 laser, optics, power electronics", "sourceIds": ["trumpf-euv-drive-laser"]}, {"source": "laser-produced-euv-plasma-source", "target": "asml-euv-high-na-systems", "value": 5, "summary": "The source turns tin plasma into 13.5nm EUV light.", "score": 5, "type": "equipment module", "commodity": "tin plasma source", "sourceIds": ["asml-euv-systems"]}, {"source": "molybdenum-mo", "target": "mo-si-multilayer-mirror-coatings", "value": 5, "summary": "EUV mirrors use molybdenum/silicon multilayers to reflect EUV light.", "score": 5, "type": "raw material", "commodity": "molybdenum", "sourceIds": ["zeiss-euv-lithography"]}, {"source": "semiconductor-grade-silicon-feedstock", "target": "mo-si-multilayer-mirror-coatings", "value": 4, "summary": "Silicon is the other named layer material in ZEISS EUV mirror stacks.", "score": 4, "type": "raw material", "commodity": "silicon", "sourceIds": ["zeiss-euv-lithography"]}, {"source": "ultra-flat-mirror-substrates", "target": "mo-si-multilayer-mirror-coatings", "value": 5, "summary": "EUV mirrors require extreme smoothness and precision coatings.", "score": 5, "type": "precision material", "commodity": "optical substrates", "sourceIds": ["asml-lenses-and-mirrors"]}, {"source": "mo-si-multilayer-mirror-coatings", "target": "zeiss-euv-optics-modules", "value": 5, "summary": "EUV uses mirrors rather than lenses because EUV is absorbed by materials/air.", "score": 5, "type": "supplier module", "commodity": "EUV mirrors", "sourceIds": ["asml-lenses-and-mirrors"]}, {"source": "zeiss-euv-optics-modules", "target": "asml-euv-high-na-systems", "value": 5, "summary": "ASML says Carl Zeiss SMT is the sole supplier of critical optical components.", "score": 5, "type": "single-source module", "commodity": "ZEISS optical columns", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "rare-earths-nd-pr-dy-tb-etc", "target": "rare-earth-magnet-assemblies", "value": 4, "summary": "Rare earth magnets are used in low-friction precision motion systems.", "score": 4, "type": "raw material", "commodity": "neodymium, praseodymium, dysprosium, terbium", "sourceIds": ["asml-robust-supply-chain"]}, {"source": "rare-earth-magnet-assemblies", "target": "wafer-reticle-stages-and-mechatronics", "value": 4, "summary": "Precision stages position wafers/reticles at nanometer scale.", "score": 4, "type": "supplier module", "commodity": "magnets, motors", "sourceIds": ["asml-euv-systems"]}, {"source": "wafer-reticle-stages-and-mechatronics", "target": "asml-euv-high-na-systems", "value": 5, "summary": "Stage control is core to overlay, throughput and scanner performance.", "score": 5, "type": "equipment module", "commodity": "stages", "sourceIds": ["asml-euv-systems"]}, {"source": "wafer-reticle-stages-and-mechatronics", "target": "asml-duv-lithography-systems", "value": 4, "summary": "DUV systems also depend on precision stages and mechatronics.", "score": 4, "type": "equipment module", "commodity": "stages", "sourceIds": ["asml-robust-supply-chain"]}, {"source": "steel-iron-ore", "target": "machine-frames-and-precision-structures", "value": 3, "summary": "ASML says steel is among the major raw materials by machine weight.", "score": 3, "type": "commodity", "commodity": "steel", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "aluminum-bauxite", "target": "machine-frames-and-precision-structures", "value": 3, "summary": "ASML says aluminum is among the major raw materials by machine weight.", "score": 3, "type": "commodity", "commodity": "aluminum", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "machine-frames-and-precision-structures", "target": "asml-euv-high-na-systems", "value": 3, "summary": "Large scanner platforms require high-stability structural modules.", "score": 3, "type": "equipment structure", "commodity": "frames", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "machine-frames-and-precision-structures", "target": "asml-duv-lithography-systems", "value": 3, "summary": "DUV scanners also depend on high-stability structural modules.", "score": 3, "type": "equipment structure", "commodity": "frames", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "vacuum-pumps-ceramics-seals", "target": "high-vacuum-euv-light-path", "value": 4, "summary": "EUV light is absorbed by air, so the full EUV path runs in vacuum.", "score": 4, "type": "supplier module", "commodity": "vacuum modules", "sourceIds": ["asml-euv-systems"]}, {"source": "high-vacuum-euv-light-path", "target": "asml-euv-high-na-systems", "value": 5, "summary": "Vacuum infrastructure is essential to transmitting EUV photons through the scanner.", "score": 5, "type": "equipment module", "commodity": "vacuum", "sourceIds": ["asml-euv-systems"]}, {"source": "fluorine-chlorine-sulfur-petrochemical-feedstocks", "target": "wet-chemicals-and-solvents", "value": 5, "summary": "TSMC identifies chemicals as one of its key raw material categories.", "score": 5, "type": "chemical feedstock", "commodity": "HF, HCl, H2SO4, H2O2, solvents", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "wet-chemicals-and-solvents", "target": "etch-clean-strip-process-steps", "value": 5, "summary": "Wet chemicals are needed for cleaning, stripping and etch processes.", "score": 5, "type": "fab material", "commodity": "wet chemicals", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "etch-clean-strip-process-steps", "target": "tsmc-leading-edge-wafer-fabs", "value": 5, "summary": "Leading-edge logic needs many repeated etch/clean steps.", "score": 5, "type": "process step", "commodity": "process chemicals", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "nitrogen-hydrogen-argon-helium", "target": "electronic-specialty-gases", "value": 5, "summary": "TSMC identifies gases as key raw materials.", "score": 5, "type": "industrial gas", "commodity": "N2, H2, Ar, He", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "fluorine-chlorine-sulfur-petrochemical-feedstocks", "target": "electronic-specialty-gases", "value": 5, "summary": "Etch and chamber-clean gases include fluorinated compounds and other specialties.", "score": 5, "type": "gas precursor", "commodity": "NF3, PFCs, SF6", "sourceIds": ["tsmc-annual-report-chapter-7"]}, {"source": "neon-krypton-xenon-rare-gas-supply", "target": "electronic-specialty-gases", "value": 3, "summary": "Rare gases are part of semiconductor specialty-gas supply chains and can be disrupted by geopolitical shocks.", "score": 3, "type": "rare gas", "commodity": "Ne, Kr, Xe", "sourceIds": ["eu-jrc-rare-gases"]}, {"source": "electronic-specialty-gases", "target": "deposition-etch-chamber-clean-steps", "value": 5, "summary": "Direct emissions disclosures show use of gases including PFCs, SF6 and NF3.", "score": 5, "type": "fab material", "commodity": "electronic gases", "sourceIds": ["tsmc-annual-report-chapter-7"]}, {"source": "deposition-etch-chamber-clean-steps", "target": "tsmc-leading-edge-wafer-fabs", "value": 5, "summary": "Etch/deposition/chamber-clean gases are fundamental to wafer-fab operations.", "score": 5, "type": "process step", "commodity": "process gases", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "photoacid-polymer-solvent-precursors", "target": "photoresist-euv-resist", "value": 5, "summary": "TSMC identifies photoresist as a key raw material category; advanced nodes require qualified resist ecosystems.", "score": 5, "type": "chemical feedstock", "commodity": "photoresist", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "photoresist-euv-resist", "target": "lithography-patterning-steps", "value": 5, "summary": "Resist quality gates lithography resolution, defectivity and yield.", "score": 5, "type": "fab material", "commodity": "resists", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "photomask-blanks-quartz-substrates", "target": "photomasks-reticles", "value": 5, "summary": "Reticles are needed to define circuit patterns for each lithography layer.", "score": 5, "type": "materials + tooling", "commodity": "quartz mask blanks, absorbers", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "photomasks-reticles", "target": "lithography-patterning-steps", "value": 5, "summary": "Each layer's pattern requires masks/reticles, especially for DUV and EUV patterning.", "score": 5, "type": "fab input", "commodity": "masks/reticles", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "asml-euv-high-na-systems", "target": "lithography-patterning-steps", "value": 5, "summary": "EUV scanners enable leading-edge critical layers.", "score": 5, "type": "capital equipment", "commodity": "EUV scanners", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "asml-duv-lithography-systems", "target": "lithography-patterning-steps", "value": 4, "summary": "DUV scanners support many layers even in advanced-node flows.", "score": 4, "type": "capital equipment", "commodity": "DUV scanners", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "lithography-patterning-steps", "target": "tsmc-leading-edge-wafer-fabs", "value": 5, "summary": "Patterning is the central repeated bottleneck in leading-edge fabrication.", "score": 5, "type": "process step", "commodity": "lithography", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "copper", "target": "pvd-sputter-targets-electroplating-chemistries", "value": 4, "summary": "Copper is a major interconnect metal and sputtering target material.", "score": 4, "type": "metal", "commodity": "copper", "sourceIds": ["oecd-semiconductor-value-chain"]}, {"source": "tungsten", "target": "cvd-ald-metal-precursors", "value": 4, "summary": "Tungsten and other metals are used in contacts/interconnect and deposition steps.", "score": 4, "type": "metal", "commodity": "tungsten", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "tantalum-titanium", "target": "pvd-sputter-targets-barrier-metals", "value": 4, "summary": "OECD identifies aluminum, titanium, tantalum and copper as common sputtering-target materials.", "score": 4, "type": "metal", "commodity": "Ta, Ti", "sourceIds": ["oecd-semiconductor-value-chain"]}, {"source": "cobalt-nickel", "target": "advanced-interconnect-contact-materials", "value": 3, "summary": "Cobalt/nickel-class materials are part of advanced metallization/contact ecosystems.", "score": 3, "type": "metal", "commodity": "Co, Ni", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "hafnium-zirconium", "target": "high-k-dielectric-precursors", "value": 4, "summary": "High-k gate stacks depend on specialty metal precursors.", "score": 4, "type": "metal precursor", "commodity": "Hf, Zr", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "aluminum-bauxite", "target": "pvd-sputter-targets-electroplating-chemistries", "value": 3, "summary": "Aluminum is a common sputtering-target material and packaging conductor.", "score": 3, "type": "metal", "commodity": "aluminum", "sourceIds": ["oecd-semiconductor-value-chain"]}, {"source": "pvd-sputter-targets-electroplating-chemistries", "target": "thin-film-deposition-metallization", "value": 4, "summary": "Deposition materials are one of the major fab-material segments.", "score": 4, "type": "fab material", "commodity": "targets, plating chemicals", "sourceIds": ["oecd-semiconductor-value-chain"]}, {"source": "cvd-ald-metal-precursors", "target": "thin-film-deposition-metallization", "value": 4, "summary": "Advanced nodes require qualified ALD/CVD precursor supply.", "score": 4, "type": "fab material", "commodity": "precursors", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "pvd-sputter-targets-barrier-metals", "target": "thin-film-deposition-metallization", "value": 4, "summary": "Barrier/liner metals are required for reliable interconnect stacks.", "score": 4, "type": "fab material", "commodity": "Ta/Ti targets", "sourceIds": ["oecd-semiconductor-value-chain"]}, {"source": "advanced-interconnect-contact-materials", "target": "thin-film-deposition-metallization", "value": 3, "summary": "Advanced interconnect/contact materials shape resistance, yield and reliability.", "score": 3, "type": "fab material", "commodity": "Co/Ni", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "high-k-dielectric-precursors", "target": "gate-stack-formation", "value": 4, "summary": "High-k dielectric precursors support transistor gate stacks.", "score": 4, "type": "fab material", "commodity": "Hf/Zr precursors", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "thin-film-deposition-metallization", "target": "tsmc-leading-edge-wafer-fabs", "value": 4, "summary": "Interconnect and thin-film deposition are core wafer-fab modules.", "score": 4, "type": "process step", "commodity": "thin films", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "gate-stack-formation", "target": "tsmc-leading-edge-wafer-fabs", "value": 4, "summary": "Gate-stack engineering is central to node performance and yield.", "score": 4, "type": "process step", "commodity": "transistor stack", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "silica-alumina-ceria-abrasives", "target": "cmp-slurry-abrasives", "value": 4, "summary": "CMP uses specialized slurries, pads and conditioners.", "score": 4, "type": "mineral / chemical", "commodity": "silica, alumina, ceria", "sourceIds": ["3m-cmp-materials"]}, {"source": "polyurethane-diamond-conditioners", "target": "cmp-pads-pad-conditioners", "value": 4, "summary": "CMP consumables include pads and conditioners.", "score": 4, "type": "polymer / industrial material", "commodity": "pads, conditioners", "sourceIds": ["3m-cmp-materials"]}, {"source": "cmp-slurry-abrasives", "target": "cmp-planarization-steps", "value": 4, "summary": "Planarization enables multilayer device/interconnect formation.", "score": 4, "type": "fab material", "commodity": "slurries", "sourceIds": ["3m-cmp-materials"]}, {"source": "cmp-pads-pad-conditioners", "target": "cmp-planarization-steps", "value": 4, "summary": "Pads/conditioners are recurring consumables in CMP.", "score": 4, "type": "fab material", "commodity": "pads/conditioners", "sourceIds": ["3m-cmp-materials"]}, {"source": "cmp-planarization-steps", "target": "tsmc-leading-edge-wafer-fabs", "value": 4, "summary": "CMP is required repeatedly across advanced-node process flows.", "score": 4, "type": "process step", "commodity": "CMP", "sourceIds": ["3m-cmp-materials"]}, {"source": "electricity-grid-renewable-ppas", "target": "tsmc-power-supply", "value": 5, "summary": "TSMC's 2024 energy consumption was dominated by purchased electricity.", "score": 5, "type": "utility", "commodity": "electricity", "sourceIds": ["tsmc-green-power-report"]}, {"source": "natural-gas", "target": "tsmc-power-process-heat-backup", "value": 2, "summary": "Natural gas is a smaller part of TSMC energy use than electricity but still present.", "score": 2, "type": "utility", "commodity": "natural gas", "sourceIds": ["tsmc-green-power-report"]}, {"source": "tsmc-power-supply", "target": "tsmc-leading-edge-wafer-fabs", "value": 5, "summary": "Fabs are power-intensive, and outages hit yield/capacity.", "score": 5, "type": "utility", "commodity": "electricity", "sourceIds": ["tsmc-green-power-report"]}, {"source": "water-sources", "target": "ultrapure-water-systems", "value": 5, "summary": "Fabs depend heavily on purified water for rinse/clean processes.", "score": 5, "type": "utility", "commodity": "water", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "ultrapure-water-systems", "target": "wet-chemicals-and-solvents", "value": 4, "summary": "UPW is part of chemical cleaning and wet process operations.", "score": 4, "type": "utility", "commodity": "UPW", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "ultrapure-water-systems", "target": "tsmc-leading-edge-wafer-fabs", "value": 5, "summary": "Water availability and treatment capacity gate fab operations.", "score": 5, "type": "utility", "commodity": "UPW", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "etch-deposition-cmp-implant-metrology-tools", "target": "tsmc-leading-edge-wafer-fabs", "value": 5, "summary": "TSMC depends on limited numbers of suppliers for critical semiconductor tools.", "score": 5, "type": "capital equipment", "commodity": "process tools", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "asml-supplier-network", "target": "asml-euv-high-na-systems", "value": 5, "summary": "ASML operates as a system architect/integrator and relies on thousands of suppliers.", "score": 5, "type": "supplier ecosystem", "commodity": "supplier base", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "asml-supplier-network", "target": "asml-duv-lithography-systems", "value": 4, "summary": "ASML reports thousands of suppliers and many product-related dependencies.", "score": 4, "type": "supplier ecosystem", "commodity": "supplier base", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "tsmc-qualified-supplier-base", "target": "300mm-silicon-wafers", "value": 5, "summary": "TSMC has long-term wafer agreements and limited-source raw wafer suppliers.", "score": 5, "type": "qualified supplier ecosystem", "commodity": "wafer suppliers", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "tsmc-qualified-supplier-base", "target": "wet-chemicals-and-solvents", "value": 4, "summary": "Some raw materials are sole-sourced or limited-source because of purity/qualification.", "score": 4, "type": "qualified supplier ecosystem", "commodity": "chemicals", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "tsmc-qualified-supplier-base", "target": "electronic-specialty-gases", "value": 4, "summary": "Qualification and purity requirements make switching gas suppliers slow.", "score": 4, "type": "qualified supplier ecosystem", "commodity": "gases", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "tsmc-qualified-supplier-base", "target": "photoresist-euv-resist", "value": 5, "summary": "Advanced resist supply is highly qualification-sensitive.", "score": 5, "type": "qualified supplier ecosystem", "commodity": "photoresist", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "tsmc-leading-edge-wafer-fabs", "target": "leading-edge-logic-dies", "value": 5, "summary": "Advanced-node wafers are diced into accelerator/ASIC logic dies.", "score": 5, "type": "output", "commodity": "N2/N3/N5 logic", "sourceIds": ["tsmc-annual-report-2025"]}, {"source": "leading-edge-logic-dies", "target": "tsmc-cowos-3dfabric-advanced-packaging", "value": 5, "summary": "AI accelerators need logic dies packaged with HBM and high-density interconnect.", "score": 5, "type": "semi-finished input", "commodity": "logic dies", "sourceIds": ["tsmc-cowos"]}, {"source": "300mm-silicon-wafers", "target": "silicon-interposers-local-silicon-interconnect", "value": 5, "summary": "CoWoS-S uses a large silicon interposer and integrates HBM cubes.", "score": 5, "type": "packaging material", "commodity": "silicon interposer", "sourceIds": ["tsmc-cowos"]}, {"source": "silicon-interposers-local-silicon-interconnect", "target": "tsmc-cowos-3dfabric-advanced-packaging", "value": 5, "summary": "Silicon interposer capacity is a critical advanced-packaging input.", "score": 5, "type": "packaging component", "commodity": "interposer", "sourceIds": ["tsmc-cowos"]}, {"source": "abf-resin-glass-fiber-copper-foil", "target": "abf-bt-package-substrates", "value": 5, "summary": "High-end substrates connect packaged accelerators to boards and are supply-constrained in AI ramps.", "score": 5, "type": "packaging substrate", "commodity": "ABF resin, glass fiber, copper foil", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "abf-bt-package-substrates", "target": "tsmc-cowos-3dfabric-advanced-packaging", "value": 5, "summary": "Substrates are required below CoWoS/interposer assemblies.", "score": 5, "type": "packaging component", "commodity": "substrates", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "copper", "target": "microbumps-rdl-package-wiring", "value": 4, "summary": "Advanced packages use dense copper redistribution/wiring.", "score": 4, "type": "metal", "commodity": "copper", "sourceIds": ["tsmc-cowos"]}, {"source": "precious-metals-au-pd-pt-ag", "target": "plating-bonding-connector-materials", "value": 2, "summary": "Precious metals are used selectively in bonding, plating or connectors.", "score": 2, "type": "metal", "commodity": "gold, palladium, platinum, silver", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "solder-alloys-underfill-thermal-materials", "target": "microbumps-rdl-package-wiring", "value": 4, "summary": "Interconnect, underfill and thermal materials support stacked AI packages.", "score": 4, "type": "packaging material", "commodity": "solder, underfill, TIM", "sourceIds": ["tsmc-cowos"]}, {"source": "microbumps-rdl-package-wiring", "target": "tsmc-cowos-3dfabric-advanced-packaging", "value": 5, "summary": "CoWoS packaging requires high-density interconnect and RDL flows.", "score": 5, "type": "packaging process", "commodity": "RDL/microbumps", "sourceIds": ["tsmc-cowos"]}, {"source": "hbm-dram-ecosystem", "target": "hbm-cubes-memory-stacks", "value": 5, "summary": "CoWoS packages integrate logic with HBM cubes; HBM is an external but coupled bottleneck.", "score": 5, "type": "adjacent bottleneck", "commodity": "HBM", "sourceIds": ["tsmc-cowos"]}, {"source": "hbm-cubes-memory-stacks", "target": "tsmc-cowos-3dfabric-advanced-packaging", "value": 5, "summary": "CoWoS-S explicitly integrates logic chiplets with HBM cubes.", "score": 5, "type": "packaging input", "commodity": "HBM cubes", "sourceIds": ["tsmc-cowos"]}, {"source": "tsmc-cowos-3dfabric-advanced-packaging", "target": "packaged-ai-accelerators-asics", "value": 5, "summary": "Advanced packaging converts dies + HBM into usable accelerator packages.", "score": 5, "type": "output", "commodity": "AI packages", "sourceIds": ["tsmc-cowos"]}, {"source": "packaged-ai-accelerators-asics", "target": "ai-data-center-capacity", "value": 5, "summary": "Accelerator package availability constrains AI infrastructure deployment.", "score": 5, "type": "downstream output", "commodity": "accelerators", "sourceIds": ["tsmc-annual-report-2025"]}, {"source": "steel-iron-ore", "target": "etch-deposition-cmp-implant-metrology-tools", "value": 2, "summary": "Non-lithography tools have substantial precision metal structures.", "score": 2, "type": "equipment commodity", "commodity": "steel", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "aluminum-bauxite", "target": "etch-deposition-cmp-implant-metrology-tools", "value": 2, "summary": "Non-lithography tools use precision aluminum structures and modules.", "score": 2, "type": "equipment commodity", "commodity": "aluminum", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "ceramics-quartzware-graphite", "target": "etch-deposition-cmp-implant-metrology-tools", "value": 4, "summary": "Fab tools require high-purity chambers, liners, electrostatic chucks and consumables.", "score": 4, "type": "equipment consumables", "commodity": "ceramics, quartz, graphite", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"source": "custom-semiconductors-controls", "target": "etch-deposition-cmp-implant-metrology-tools", "value": 4, "summary": "Precision tools rely on control electronics, sensors and power modules.", "score": 4, "type": "electronics", "commodity": "electronics", "sourceIds": ["tsmc-2025-20-f"]}, {"source": "custom-semiconductors-controls", "target": "asml-euv-high-na-systems", "value": 4, "summary": "ASML systems require complex control and power electronics integrated across the machine.", "score": 4, "type": "electronics", "commodity": "electronics", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "custom-semiconductors-controls", "target": "asml-duv-lithography-systems", "value": 3, "summary": "DUV systems require complex controls, sensors and electronics.", "score": 3, "type": "electronics", "commodity": "electronics", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"source": "tsmc-power-process-heat-backup", "target": "tsmc-power-supply", "value": 2, "summary": "Backup generation and process-heat supply feed into overall fab power.", "score": 2, "type": "utility", "commodity": "natural gas / power", "sourceIds": ["tsmc-green-power-report"]}, {"source": "plating-bonding-connector-materials", "target": "microbumps-rdl-package-wiring", "value": 2, "summary": "Plating, bonding and connector materials are consumed in package wiring and interconnect.", "score": 2, "type": "packaging material", "commodity": "Au/Pd/Pt/Ag", "sourceIds": ["tsmc-cowos"]}], "themes": [{"rank": 1, "title": "ASML / ZEISS EUV optics", "impacted": "EUV scanner output", "score": 5, "why": "Sole-source optical-column dependency; Mo/Si mirrors require extreme precision.", "sourceIds": ["asml-annual-report-2025-sec-html"]}, {"rank": 2, "title": "ASML EUV source", "impacted": "EUV scanner throughput/availability", "score": 5, "why": "Tin droplets + high-power CO2 laser + source collector ecosystem.", "sourceIds": ["trumpf-euv-drive-laser"]}, {"rank": 3, "title": "TSMC silicon wafers", "impacted": "All advanced wafer starts", "score": 5, "why": "TSMC calls silicon wafers its most important raw material; limited suppliers/geographies.", "sourceIds": ["tsmc-2025-20-f"]}, {"rank": 4, "title": "TSMC photoresist + masks", "impacted": "Patterning yield and node ramp", "score": 5, "why": "Qualified resist/reticle ecosystem is hard to substitute.", "sourceIds": ["tsmc-2025-20-f"]}, {"rank": 5, "title": "Electronic gases + wet chemicals", "impacted": "Etch/deposition/clean capacity", "score": 5, "why": "High-purity, hazardous, qualification-sensitive; rare-gas shock risk.", "sourceIds": ["sia-semiconductor-supply-chain"]}, {"rank": 6, "title": "ASML scanner supply into TSMC", "impacted": "Front-end capacity expansion", "score": 5, "why": "Leading-edge fabs require EUV and DUV tools plus limited-source service/install capacity.", "sourceIds": ["tsmc-2025-20-f"]}, {"rank": 7, "title": "TSMC power + water", "impacted": "Fab uptime and expansion", "score": 5, "why": "TSMC disclosed 27,456 GWh total energy in 2024; UPW/power are hard site constraints.", "sourceIds": ["tsmc-green-power-report"]}, {"rank": 8, "title": "CoWoS / HBM / substrates", "impacted": "Packaged AI accelerator output", "score": 5, "why": "AI chips need logic + HBM + advanced packaging; CoWoS is a key post-fab bottleneck.", "sourceIds": ["tsmc-cowos"]}, {"rank": 9, "title": "Rare-earth magnets / stages", "impacted": "Scanner overlay/throughput", "score": 4, "why": "Precision mechatronics depend on rare-earth magnets and qualified assemblies.", "sourceIds": ["asml-robust-supply-chain"]}, {"rank": 10, "title": "Non-lithography process tools", "impacted": "Full fab line balance", "score": 5, "why": "Etch, deposition, CMP, implant and inspection all must scale together.", "sourceIds": ["tsmc-2025-20-f"]}]}</script>
+  <script>
+    const DATA = JSON.parse(document.getElementById('app-data').textContent);
+    const sourceById = new Map(DATA.sources.map(d => [d.id, d]));
+    const nodeById = new Map(DATA.nodes.map(d => [d.id, d]));
+
+    const groupColors = new Map([
+      ['AI compute', '#0f766e'],
+      ['Advanced packaging', '#7c3aed'],
+      ['Fab process', '#c2410c'],
+      ['Lithography systems', '#be123c'],
+      ['Precision optics & source', '#4338ca'],
+      ['Qualified materials', '#2563eb'],
+      ['Raw commodities', '#047857'],
+      ['Utilities & energy', '#475569']
+    ]);
+
+    const svg = d3.select('#sankey');
+    const tooltip = d3.select('#tooltip');
+    let selected = null;
+    let renderTimer;
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    }
+
+    function sourceChips(sourceIds) {
+      const ids = [...new Set(sourceIds || [])];
+      if (!ids.length) return '';
+      return `<div class="source-links">${ids.map(id => {
+        const s = sourceById.get(id);
+        return s ? `<a class="source-link" target="_blank" rel="noopener" href="${s.url}">${escapeHtml(s.name)}</a>` : '';
+      }).join('')}</div>`;
+    }
+
+    function scorePill(score) {
+      if (!score) return '';
+      return `<span class="score-pill s${score}">Bottleneck ${score}/5</span>`;
+    }
+
+    function tooltipHtml(kind, d) {
+      if (kind === 'link') {
+        return `<strong>${escapeHtml(d.source.label)} → ${escapeHtml(d.target.label)}</strong>` +
+          `<div>${escapeHtml(d.summary || '')}</div>` +
+          (d.score ? `<div class="hint">Bottleneck score ${d.score}/5 · click for source</div>` : `<div class="hint">Click for source</div>`);
+      }
+      return `<strong>${escapeHtml(d.label)}</strong><div>${escapeHtml(d.group)}</div>` +
+        `<div>${escapeHtml(d.summary || '')}</div><div class="hint">Click for sources</div>`;
+    }
+
+    function setDetail(kind, d) {
+      selected = { kind, id: kind === 'link' ? `${d.source.id}->${d.target.id}` : d.id };
+      const panel = document.getElementById('detail-panel');
+      if (kind === 'link') {
+        const commodity = d.commodity ? `<p class="commodity-line">Commodity / industrial base: <strong>${escapeHtml(d.commodity)}</strong></p>` : '';
+        panel.innerHTML = `
+          <div class="detail-kicker">Selected dependency</div>
+          <h2>${escapeHtml(d.source.label)} → ${escapeHtml(d.target.label)}</h2>
+          <div class="detail-meta-row">${scorePill(d.score)}${d.type ? `<span class="detail-type">${escapeHtml(d.type)}</span>` : ''}</div>
+          <p class="detail-summary">${escapeHtml(d.summary || '')}</p>
+          ${commodity}
+          <div class="detail-kicker">Source</div>
+          ${sourceChips(d.sourceIds) || '<p class="note">No source mapped.</p>'}
+        `;
+      } else {
+        panel.innerHTML = `
+          <div class="detail-kicker">Selected node</div>
+          <h2>${escapeHtml(d.label)}</h2>
+          <div class="mini-stat">Layer: <strong>${escapeHtml(d.group)}</strong></div>
+          <p class="detail-summary">${escapeHtml(d.summary || '')}</p>
+          <div class="detail-kicker">Sources</div>
+          ${sourceChips(d.sourceIds) || '<p class="note">No source mapped.</p>'}
+        `;
+      }
+      applySelectionStyles();
+    }
+
+    function applySelectionStyles() {
+      if (!selected) return;
+      d3.selectAll('.link').classed('selected', function(d) {
+        return selected.kind === 'link' && selected.id === `${d.source.id}->${d.target.id}`;
+      });
+      d3.selectAll('.node').classed('selected', function(d) {
+        return selected.kind === 'node' && selected.id === d.id;
+      });
+    }
+
+    function showTooltip(event, kind, d) {
+      tooltip.html(tooltipHtml(kind, d)).style('opacity', 1);
+      moveTooltip(event);
+    }
+    function moveTooltip(event) {
+      const x = Math.min(window.innerWidth - 190, Math.max(190, event.clientX));
+      const y = Math.max(120, event.clientY);
+      tooltip.style('left', `${x}px`).style('top', `${y}px`);
+    }
+    function hideTooltip() { tooltip.style('opacity', 0); }
+
+    function renderLegend() {
+      const el = document.getElementById('legend');
+      el.innerHTML = [...groupColors.entries()].map(([group, color]) =>
+        `<span class="pill"><span class="dot" style="background:${color}"></span>${escapeHtml(group)}</span>`
+      ).join('');
+    }
+
+    function renderSankey() {
+      const container = document.getElementById('sankey');
+      const box = container.getBoundingClientRect();
+      const width = Math.max(1080, box.width || 1500);
+      const height = Math.max(1200, box.height || 1480);
+      svg.selectAll('*').remove();
+      svg.attr('viewBox', `0 0 ${width} ${height}`);
+
+      const margin = {top: 30, right: 184, bottom: 18, left: 176};
+      const graph = {
+        nodes: DATA.nodes.map(d => ({...d})),
+        links: DATA.links.map(d => ({...d}))
+      };
+
+      const sankey = d3.sankey()
+        .nodeId(d => d.id)
+        .nodeAlign(d3.sankeyJustify)
+        .nodeWidth(16)
+        .nodePadding(9)
+        .extent([[margin.left, margin.top], [width - margin.right, height - margin.bottom]])
+        .iterations(64);
+
+      sankey(graph);
+
+      const defs = svg.append('defs');
+      graph.links.forEach((d, i) => {
+        const grad = defs.append('linearGradient')
+          .attr('id', `grad-${i}`)
+          .attr('gradientUnits', 'userSpaceOnUse')
+          .attr('x1', d.source.x1)
+          .attr('x2', d.target.x0);
+        grad.append('stop').attr('offset', '0%').attr('stop-color', groupColors.get(d.source.group) || '#64748b');
+        grad.append('stop').attr('offset', '100%').attr('stop-color', groupColors.get(d.target.group) || '#64748b');
+      });
+
+      svg.append('g')
+        .attr('fill', 'none')
+        .selectAll('path')
+        .data(graph.links)
+        .join('path')
+          .attr('class', 'link')
+          .attr('d', d3.sankeyLinkHorizontal())
+          .attr('stroke', (d, i) => `url(#grad-${i})`)
+          .attr('stroke-width', d => Math.max(1, d.width))
+          .on('mouseover', (event, d) => showTooltip(event, 'link', d))
+          .on('mousemove', moveTooltip)
+          .on('mouseout', hideTooltip)
+          .on('click', (event, d) => { event.stopPropagation(); setDetail('link', d); });
+
+      const node = svg.append('g')
+        .selectAll('g')
+        .data(graph.nodes)
+        .join('g')
+          .attr('class', 'node')
+          .on('mouseover', (event, d) => showTooltip(event, 'node', d))
+          .on('mousemove', moveTooltip)
+          .on('mouseout', hideTooltip)
+          .on('click', (event, d) => { event.stopPropagation(); setDetail('node', d); });
+
+      node.append('rect')
+        .attr('x', d => d.x0)
+        .attr('y', d => d.y0)
+        .attr('height', d => Math.max(1, d.y1 - d.y0))
+        .attr('width', d => d.x1 - d.x0)
+        .attr('rx', 4)
+        .attr('fill', d => groupColors.get(d.group) || '#64748b');
+
+      const finalColumnX = d3.max(graph.nodes, d => d.x0);
+      const firstColumnX = d3.min(graph.nodes, d => d.x0);
+      const label = node.append('text')
+        .attr('class', 'node-label')
+        .attr('x', d => Math.abs(d.x0 - firstColumnX) < 2 ? d.x0 - 8 : d.x1 + 8)
+        .attr('y', d => (d.y0 + d.y1) / 2)
+        .attr('dy', '0.35em')
+        .attr('text-anchor', d => Math.abs(d.x0 - firstColumnX) < 2 ? 'end' : 'start')
+        .text(d => d.label);
+
+      label.each(function(d) {
+        const text = d3.select(this);
+        const words = d.label.split(/\s+/).reverse();
+        const lineHeight = 1.12;
+        const x = text.attr('x');
+        const y = text.attr('y');
+        const isLast = Math.abs(d.x0 - finalColumnX) < 2;
+        const isFirst = Math.abs(d.x0 - firstColumnX) < 2;
+        const maxWidth = isLast ? Math.max(120, margin.right - 18)
+          : isFirst ? Math.max(120, margin.left - 16) : 168;
+        let word, line = [], lineNumber = 0;
+        text.text(null);
+        let tspan = text.append('tspan').attr('x', x).attr('y', y).attr('dy', '0.35em');
+        while ((word = words.pop())) {
+          line.push(word);
+          tspan.text(line.join(' '));
+          if (tspan.node().getComputedTextLength() > maxWidth && line.length > 1) {
+            line.pop();
+            tspan.text(line.join(' '));
+            line = [word];
+            tspan = text.append('tspan').attr('x', x).attr('y', y).attr('dy', `${++lineNumber * lineHeight + 0.35}em`).text(word);
+          }
+        }
+        const tspans = text.selectAll('tspan');
+        const shift = -(tspans.size() - 1) * 6.2;
+        tspans.attr('dy', function(_, i) { return i === 0 ? `${shift}px` : '1.12em'; });
+      });
+
+      // dynamic column headers from modal group per column
+      const colMap = d3.rollups(graph.nodes, v => {
+        const counts = d3.rollups(v, g => g.length, g => g.group).sort((a,b) => b[1]-a[1]);
+        return counts[0][0];
+      }, d => Math.round(d.x0)).sort((a,b) => a[0]-b[0]);
+      let prev = null;
+      const headers = colMap.map(([x, grp]) => {
+        const label = grp === prev ? '' : grp;
+        prev = grp;
+        return {x, label};
+      });
+      svg.append('g').selectAll('text')
+        .data(headers)
+        .join('text')
+        .attr('class','node-group-label')
+        .attr('x', d => d.x)
+        .attr('y', 14)
+        .text(d => d.label);
+
+      applySelectionStyles();
+    }
+
+    function renderSources() {
+      const el = document.getElementById('source-library');
+      el.innerHTML = DATA.sources.map(s => {
+        const points = s.points ? `<div class="source-meta">${escapeHtml(s.points)}</div>` : '';
+        const type = s.type ? `<div class="source-meta"><strong>${escapeHtml(s.type)}</strong></div>` : '';
+        return `<article class="source-card"><a class="primary-source" href="${s.url}" target="_blank" rel="noopener">${escapeHtml(s.name)}</a>${type}${points}</article>`;
+      }).join('');
+    }
+
+    function renderThemes() {
+      const el = document.getElementById('theme-grid');
+      el.innerHTML = DATA.themes.map(t => {
+        return `<article class="theme-card">
+          <div class="theme-head"><h2>${t.rank ? t.rank + '. ' : ''}${escapeHtml(t.title)}</h2>${scorePill(t.score)}</div>
+          <div class="impacted">Capacity impacted: ${escapeHtml(t.impacted || '')}</div>
+          <p>${escapeHtml(t.why || '')}</p>
+          ${sourceChips(t.sourceIds)}
+        </article>`;
+      }).join('');
+    }
+
+    function setupTabs() {
+      document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-button').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+          document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === btn.dataset.tab));
+          if (btn.dataset.tab === 'map-tab') setTimeout(renderSankey, 0);
+        });
+      });
+    }
+
+    renderLegend();
+    renderSources();
+    renderThemes();
+    setupTabs();
+    renderSankey();
+    window.addEventListener('resize', () => {
+      clearTimeout(renderTimer);
+      renderTimer = setTimeout(renderSankey, 160);
+    });
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#sankey') && !e.target.closest('#detail-panel')) hideTooltip();
+    });
+  </script>
+</body>
+</html>
